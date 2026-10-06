@@ -6,63 +6,162 @@ import {
 } from "react";
 
 import {
-  Minus,
-  Plus,
-   ShoppingCart,
+  ArrowLeft,
+  Phone,
+  ShoppingCart,
   X,
-  CreditCard,
 } from "lucide-react";
 
-import {
-  getMenuApi,
-} from "../api/menuApi";
+/* =========================================================
+   APIs
+========================================================= */
 
 import {
-  createCartApi,
-} from "../api/cartApi";
+  getCategoriesApi,
+  getProductsByCategoryApi,
+  getRecentProductsApi,
+} from "../api/productApi";
+
+import { createCartApi } from "../api/cartApi";
 
 import {
   createPaymentOrderApi,
   verifyPaymentApi,
 } from "../api/orderApi";
 
-import {
-  loadRazorpay,
-} from "../utils/loadRazorpay";
+import { loadRazorpay } from "../utils/loadRazorpay";
 
+/* =========================================================
+   REUSABLE COMPONENTS
+========================================================= */
+
+import ProductCard from "../components/ProductCard";
+import ProductDetails from "../components/ProductDetails";
+import Header from "../components/Header";
+import CheckoutModal from "../components/CheckoutModal";
+
+/* =========================================================
+   HELPERS
+========================================================= */
+
+const formatINR = (value) =>
+  Number(value || 0).toLocaleString("en-IN");
+
+const getErrorMessage = (error, fallback) =>
+  error?.response?.data?.message ||
+  error?.message ||
+  fallback;
+
+/* =========================================================
+   IMAGE ORIGIN
+========================================================= */
+
+const IMAGE_ORIGIN =
+  import.meta.env.VITE_API_ORIGIN ||
+  (
+    import.meta.env.VITE_API_BASE_URL || ""
+  ).replace(/\/api\/?$/, "");
+
+const imageUrl = (path) => {
+  if (!path) {
+    return "";
+  }
+
+  if (
+    path.startsWith("http://") ||
+    path.startsWith("https://")
+  ) {
+    return path;
+  }
+
+  return `${IMAGE_ORIGIN}${path}`;
+};
+
+/* =========================================================
+   NORMALIZE PRODUCT
+========================================================= */
+
+const normalizeProduct = (product) => {
+  const images = Array.isArray(product?.images)
+    ? product.images.map((image) => ({
+        id: image.id,
+        path: image.path,
+        url: imageUrl(image.path),
+      }))
+    : [];
+
+  const variants = Array.isArray(product?.sizes)
+    ? product.sizes.map((size) => ({
+        id: size.id,
+        size: size.size,
+        amount: Number(size.price || 0),
+        mrp: 0,
+      }))
+    : [];
+
+  return {
+    ...product,
+
+    category_name:
+      product?.category_name || "",
+
+    description:
+      product?.description || "",
+
+    images,
+
+    image_url:
+      images[0]?.url || "",
+
+    variants,
+  };
+};
+
+/* =========================================================
+   NORMALIZE CATEGORY
+========================================================= */
+
+const normalizeCategory = (category) => ({
+  id: category.id,
+  name: category.name,
+  image_url: imageUrl(
+    category.image_path
+  ),
+});
 
 /* =========================================================
    HOME
 ========================================================= */
 
 export default function Home() {
-
   /* =======================================================
-     STATES
+     CATALOG
   ======================================================= */
 
   const [
-    menuData,
-    setMenuData,
+    categories,
+    setCategories,
   ] = useState([]);
 
   const [
-    quantities,
-    setQuantities,
-  ] = useState({});
+    recentProducts,
+    setRecentProducts,
+  ] = useState([]);
 
   const [
-    showCheckout,
-    setShowCheckout,
-  ] = useState(false);
+    activeCategory,
+    setActiveCategory,
+  ] = useState(null);
 
   const [
-    customer,
-    setCustomer,
-  ] = useState({
-    name: "",
-    mobile: "",
-  });
+    categoryProducts,
+    setCategoryProducts,
+  ] = useState([]);
+
+  const [
+    selectedProduct,
+    setSelectedProduct,
+  ] = useState(null);
 
   const [
     loading,
@@ -70,9 +169,42 @@ export default function Home() {
   ] = useState(true);
 
   const [
-    menuError,
-    setMenuError,
+    productsLoading,
+    setProductsLoading,
+  ] = useState(false);
+
+  const [
+    error,
+    setError,
   ] = useState("");
+
+  /* =======================================================
+     CONTACT POPUP
+  ======================================================= */
+
+  const [
+    showContactPopup,
+    setShowContactPopup,
+  ] = useState(false);
+
+  /* =======================================================
+     CART / CHECKOUT
+  ======================================================= */
+
+  const [
+    cart,
+    setCart,
+  ] = useState({});
+
+  const [
+    cartId,
+    setCartId,
+  ] = useState(null);
+
+  const [
+    showCheckout,
+    setShowCheckout,
+  ] = useState(false);
 
   const [
     cartLoading,
@@ -85,111 +217,328 @@ export default function Home() {
   ] = useState(false);
 
   const [
-    cartId,
-    setCartId,
+    customer,
+    setCustomer,
+  ] = useState({
+    name: "",
+    mobile: "",
+    address: "",
+  });
+
+  const [
+    successOrder,
+    setSuccessOrder,
   ] = useState(null);
 
-const [
-  successOrder,
-  setSuccessOrder,
-] = useState(null);
   /* =======================================================
-     LOAD MENU FROM BACKEND
+     LOAD HOME
+
+     Categories +
+     Recently Added
   ======================================================= */
 
-  const loadMenu =
+  const loadHome =
     useCallback(async () => {
-
       try {
-
         setLoading(true);
-        setMenuError("");
 
-        const response =
-          await getMenuApi();
+        setError("");
 
-        const data =
-          response?.data?.data;
+        const [
+          categoryRes,
+          recentRes,
+        ] = await Promise.all([
+          getCategoriesApi(),
 
-        setMenuData(
-          Array.isArray(data)
-            ? data
+          getRecentProductsApi(4),
+        ]);
+
+        const categoryData =
+          categoryRes?.data?.data ??
+          categoryRes?.data;
+
+        const recentData =
+          recentRes?.data?.data ??
+          recentRes?.data;
+
+        setCategories(
+          Array.isArray(categoryData)
+            ? categoryData.map(
+                normalizeCategory
+              )
             : []
         );
 
-      } catch (error) {
-
+        setRecentProducts(
+          Array.isArray(recentData)
+            ? recentData.map(
+                normalizeProduct
+              )
+            : []
+        );
+      } catch (err) {
         console.error(
-          "Menu fetch error:",
-          error
+          "Home load error:",
+          err
         );
 
-        setMenuError(
-          error?.response
-            ?.data
-            ?.message ||
-          "Unable to load menu."
+        setError(
+          getErrorMessage(
+            err,
+            "Unable to load the store."
+          )
         );
-
       } finally {
-
         setLoading(false);
-
       }
-
     }, []);
-
 
   useEffect(() => {
-
-    loadMenu();
-
-  }, [loadMenu]);
-
+    loadHome();
+  }, [loadHome]);
 
   /* =======================================================
-     INCREASE QUANTITY
+     OPEN CATEGORY
   ======================================================= */
 
-  const increaseQuantity =
-    useCallback((id) => {
+  const openCategory =
+    useCallback(
+      async (category) => {
+        setSelectedProduct(null);
 
-      setQuantities(
-        (previous) => ({
-          ...previous,
+        setActiveCategory(
+          category
+        );
 
-          [id]:
-            (
-              previous[id] ||
-              0
-            ) + 1,
-        })
+        setCategoryProducts([]);
+
+        setProductsLoading(true);
+
+        setError("");
+
+        window.scrollTo({
+          top: 0,
+          behavior: "smooth",
+        });
+
+        try {
+          const response =
+            await getProductsByCategoryApi(
+              category.id
+            );
+
+          const data =
+            response?.data?.data ??
+            response?.data;
+
+          setCategoryProducts(
+            Array.isArray(data)
+              ? data.map(
+                  normalizeProduct
+                )
+              : []
+          );
+        } catch (err) {
+          console.error(
+            "Category products error:",
+            err
+          );
+
+          setError(
+            getErrorMessage(
+              err,
+              "Unable to load products."
+            )
+          );
+        } finally {
+          setProductsLoading(
+            false
+          );
+        }
+      },
+      []
+    );
+
+  /* =======================================================
+     OPEN PRODUCT
+  ======================================================= */
+
+  const openProduct =
+    useCallback((product) => {
+      setSelectedProduct(
+        product
       );
 
+      setError("");
+
+      window.scrollTo({
+        top: 0,
+        behavior: "smooth",
+      });
     }, []);
 
-
   /* =======================================================
-     DECREASE QUANTITY
+     BACK HOME
   ======================================================= */
 
-  const decreaseQuantity =
-    useCallback((id) => {
+  const backToHome =
+    useCallback(() => {
+      setSelectedProduct(null);
 
-      setQuantities(
-        (previous) => {
+      setActiveCategory(null);
 
-          const current =
-            previous[id] ||
-            0;
+      setCategoryProducts([]);
 
-          if (current <= 1) {
+      setError("");
 
+      window.scrollTo({
+        top: 0,
+        behavior: "smooth",
+      });
+    }, []);
+
+  /* =======================================================
+     BACK TO CATEGORY
+  ======================================================= */
+
+  const backToProducts =
+    useCallback(() => {
+      setSelectedProduct(null);
+
+      setError("");
+
+      window.scrollTo({
+        top: 0,
+        behavior: "smooth",
+      });
+    }, []);
+
+  /* =======================================================
+     SIMILAR PRODUCTS
+  ======================================================= */
+
+  const similarProducts =
+    useMemo(() => {
+      if (!selectedProduct) {
+        return [];
+      }
+
+      if (
+        activeCategory &&
+        categoryProducts.length > 0
+      ) {
+        return categoryProducts.filter(
+          (product) =>
+            product.id !==
+            selectedProduct.id
+        );
+      }
+
+      return recentProducts.filter(
+        (product) =>
+          product.id !==
+          selectedProduct.id
+      );
+    }, [
+      selectedProduct,
+      activeCategory,
+      categoryProducts,
+      recentProducts,
+    ]);
+
+  /* =======================================================
+     ADD TO CART
+
+     IMPORTANT:
+     Existing products are NOT removed.
+
+     Product 1
+     +
+     Product 2
+     +
+     Product 3
+
+     all remain in cart.
+  ======================================================= */
+
+  const addToCart =
+    useCallback(
+      (product, variant) => {
+        if (
+          !product ||
+          !variant
+        ) {
+          return;
+        }
+
+        /*
+          Cart changed.
+
+          Previous backend cart
+          should be recreated
+          before checkout.
+        */
+
+        setCartId(null);
+
+        setCart((previous) => {
+          const existing =
+            previous[
+              variant.id
+            ];
+
+          return {
+            ...previous,
+
+            [variant.id]: {
+              product,
+              variant,
+
+              quantity:
+                (
+                  existing?.quantity ||
+                  0
+                ) + 1,
+            },
+          };
+        });
+      },
+      []
+    );
+
+  /* =======================================================
+     CHANGE QUANTITY
+  ======================================================= */
+
+  const changeQuantity =
+    useCallback(
+      (variantId, delta) => {
+        setCartId(null);
+
+        setCart((previous) => {
+          const entry =
+            previous[
+              variantId
+            ];
+
+          if (!entry) {
+            return previous;
+          }
+
+          const nextQuantity =
+            entry.quantity +
+            delta;
+
+          if (
+            nextQuantity <= 0
+          ) {
             const updated = {
               ...previous,
             };
 
-            delete updated[id];
+            delete updated[
+              variantId
+            ];
 
             return updated;
           }
@@ -197,129 +546,106 @@ const [
           return {
             ...previous,
 
-            [id]:
-              current - 1,
+            [variantId]: {
+              ...entry,
+
+              quantity:
+                nextQuantity,
+            },
           };
-        }
-      );
-
-    }, []);
-
+        });
+      },
+      []
+    );
 
   /* =======================================================
-     SELECTED ITEMS
+     CART ITEMS
   ======================================================= */
 
-  const selectedItems =
+  const cartItems =
     useMemo(() => {
+      return Object.values(
+        cart
+      ).map((entry) => {
+        const price =
+          Number(
+            entry.variant
+              .amount || 0
+          );
 
-      return menuData
+        return {
+          variantId:
+            entry.variant.id,
 
-        .filter(
-          (item) =>
-            (
-              quantities[
-                item.id
-              ] || 0
-            ) > 0
-        )
+          productId:
+            entry.product.id,
 
-        .map((item) => {
+          name:
+            entry.product.name,
 
-          const quantity =
-            quantities[
-              item.id
-            ] || 0;
+          image_url:
+            entry.product
+              .image_url,
 
-          const price =
-            Number(
-              item.amount ||
-              0
-            );
+          size:
+            entry.variant.size,
 
-          return {
-            ...item,
+          price,
 
-            /* UI compatibility */
+          quantity:
+            entry.quantity,
 
-            size:
-              item.portion,
-
-            price,
-
-            quantity,
-
-            total:
-              price *
-              quantity,
-          };
-
-        });
-
-    }, [
-      menuData,
-      quantities,
-    ]);
-
+          total:
+            price *
+            entry.quantity,
+        };
+      });
+    }, [cart]);
 
   /* =======================================================
-     TOTAL ITEMS
+     TOTAL QUANTITY
   ======================================================= */
 
   const totalQuantity =
     useMemo(() => {
-
-      return selectedItems.reduce(
-        (
-          total,
-          item
-        ) =>
-          total +
+      return cartItems.reduce(
+        (sum, item) =>
+          sum +
           item.quantity,
         0
       );
-
-    }, [selectedItems]);
-
+    }, [cartItems]);
 
   /* =======================================================
      TOTAL AMOUNT
+
+     Automatically calculates
+     all added products.
   ======================================================= */
 
   const totalAmount =
     useMemo(() => {
-
-      return selectedItems.reduce(
-        (
-          total,
-          item
-        ) =>
-          total +
-          item.total,
+      return cartItems.reduce(
+        (sum, item) =>
+          sum + item.total,
         0
       );
-
-    }, [selectedItems]);
-
+    }, [cartItems]);
 
   /* =======================================================
-     ADD TO CART
+     CHECKOUT
 
-     IMPORTANT:
-     Button click ->
-     POST /api/cart ->
-     database save ->
-     then checkout popup opens
+     Saves CURRENT complete cart
+     to backend.
   ======================================================= */
 
-  const handleAddToCart =
+  const handleCheckout =
     async () => {
-
       if (
         totalQuantity === 0
       ) {
         alert(
-          "Please select at least one item."
+          "Please add at least one item to the cart."
         );
 
         return;
@@ -329,96 +655,117 @@ const [
         return;
       }
 
-
       try {
-
         setCartLoading(true);
-
-
-        /* =====================================
-           SEND ONLY MENU ID + QUANTITY
-
-           Amount frontend nundi trust cheyyamu.
-           Backend database nundi actual
-           amount calculate chesthundi.
-        ===================================== */
-
-        const items =
-          selectedItems.map(
-            (item) => ({
-              menuItemId:
-                Number(item.id),
-
-              quantity:
-                Number(
-                  item.quantity
-                ),
-            })
-          );
-
-
-        /* =====================================
-           SAVE CART IN DATABASE
-        ===================================== */
 
         const response =
           await createCartApi({
-            items,
-          });
+            items:
+              cartItems.map(
+                (item) => ({
+                  productId:
+                    Number(
+                      item.productId
+                    ),
 
+                  variantId:
+                    Number(
+                      item.variantId
+                    ),
+
+                  quantity:
+                    Number(
+                      item.quantity
+                    ),
+                })
+              ),
+          });
 
         const savedCart =
           response?.data?.data;
 
-
-        if (!savedCart?.cartId) {
-
+        if (
+          !savedCart?.cartId
+        ) {
           throw new Error(
             "Cart was not saved."
           );
-
         }
-
-
-        /* =====================================
-           SAVE CART ID IN REACT STATE
-        ===================================== */
 
         setCartId(
           savedCart.cartId
         );
 
-
-        /* =====================================
-           OPEN EXISTING CHECKOUT POPUP
-        ===================================== */
-
         setShowCheckout(true);
-
-
-      } catch (error) {
-
+      } catch (err) {
         console.error(
-          "Add cart error:",
-          error
+          "Create cart error:",
+          err
         );
 
         alert(
-          error?.response
-            ?.data
-            ?.message ||
-          error?.message ||
-          "Unable to add items to cart."
+          getErrorMessage(
+            err,
+            "Unable to save your cart."
+          )
         );
-
       } finally {
-
         setCartLoading(false);
-
       }
-
     };
 
+  /* =======================================================
+     ADD MORE
+
+     This is your new requirement.
+
+     Checkout closes.
+     Home page opens.
+
+     IMPORTANT:
+     cart is NOT cleared.
+     customer details are NOT cleared.
+
+     So user can add more products.
+  ======================================================= */
+
+  const handleAddMore =
+    useCallback(() => {
+      /*
+        Close checkout only.
+      */
+
+      setShowCheckout(false);
+
+      /*
+        Go to home page.
+      */
+
+      setSelectedProduct(null);
+
+      setActiveCategory(null);
+
+      setCategoryProducts([]);
+
+      setError("");
+
+      /*
+        IMPORTANT:
+
+        DO NOT:
+
+        setCart({})
+        setCartId(null)
+        setCustomer(...)
+
+        Existing cart must stay.
+      */
+
+      window.scrollTo({
+        top: 0,
+        behavior: "smooth",
+      });
+    }, []);
 
   /* =======================================================
      PAY NOW
@@ -426,25 +773,18 @@ const [
 
   const handlePayNow =
     async (event) => {
-
       event.preventDefault();
-
 
       if (paymentLoading) {
         return;
       }
 
-
-      /* =====================================
-         NAME
-      ===================================== */
+      /* CUSTOMER NAME */
 
       const customerName =
         customer.name.trim();
 
-
       if (!customerName) {
-
         alert(
           "Please enter your name."
         );
@@ -452,21 +792,16 @@ const [
         return;
       }
 
-
-      /* =====================================
-         MOBILE
-      ===================================== */
+      /* MOBILE */
 
       const mobile =
         customer.mobile.trim();
-
 
       if (
         !/^[6-9]\d{9}$/.test(
           mobile
         )
       ) {
-
         alert(
           "Please enter a valid 10-digit mobile number."
         );
@@ -474,16 +809,26 @@ const [
         return;
       }
 
+      /* ADDRESS */
 
-      /* =====================================
-         CART
-      ===================================== */
+      const address =
+        customer.address.trim();
 
       if (
-        selectedItems.length ===
-        0
+        address.length < 10
       ) {
+        alert(
+          "Please enter your full delivery address."
+        );
 
+        return;
+      }
+
+      /* CART */
+
+      if (
+        cartItems.length === 0
+      ) {
         alert(
           "Your cart is empty."
         );
@@ -491,1197 +836,1551 @@ const [
         return;
       }
 
+      /*
+        cartId is generated
+        by handleCheckout.
+      */
 
       if (!cartId) {
-
         alert(
-          "Cart not found. Please add the items to cart again."
+          "Cart not found. Please checkout again."
+        );
+
+        setShowCheckout(
+          false
         );
 
         return;
       }
 
-
       try {
-
         setPaymentLoading(
           true
         );
 
-
-        /* =====================================
-           LOAD RAZORPAY SCRIPT
-        ===================================== */
+        /* LOAD RAZORPAY */
 
         const razorpayLoaded =
           await loadRazorpay();
 
-
-        if (!razorpayLoaded) {
-
+        if (
+          !razorpayLoaded
+        ) {
           throw new Error(
             "Unable to load Razorpay."
           );
-
         }
 
-
-        /* =====================================
-           PAYMENT ITEMS
-
-           Again:
-           frontend amount send cheyyatledu.
-
-           Backend menu_items table
-           nundi amount calculate chesthundi.
-        ===================================== */
-
-        const items =
-          selectedItems.map(
-            (item) => ({
-              menuItemId:
-                Number(item.id),
-
-              quantity:
-                Number(
-                  item.quantity
-                ),
-            })
-          );
-
-
-        /* =====================================
-           CREATE RAZORPAY ORDER
-
-           Current backend already:
-           1. creates Razorpay order
-           2. inserts orders
-           3. inserts order_items
-           4. status = pending
-        ===================================== */
+        /* CREATE PAYMENT ORDER */
 
         const response =
-  await createPaymentOrderApi({
-    customer_name: customerName,
-    mobile: mobile,
-    cart_id: cartId,
-  });
+          await createPaymentOrderApi(
+            {
+              customer_name:
+                customerName,
 
+              mobile,
+
+              address,
+
+              cart_id:
+                cartId,
+            }
+          );
 
         const paymentData =
           response?.data?.data;
 
-
         if (
-  !paymentData?.razorpay_order_id ||
-  !paymentData?.key_id ||
-  !paymentData?.amount ||
-  !paymentData?.order_id
-) {
-  console.error(
-    "Invalid payment response:",
-    paymentData
-  );
+          !paymentData
+            ?.razorpay_order_id ||
+          !paymentData?.key_id ||
+          !paymentData?.amount ||
+          !paymentData?.order_id
+        ) {
+          console.error(
+            "Invalid payment response:",
+            paymentData
+          );
 
-  throw new Error(
-    "Invalid payment response."
-  );
-}
+          throw new Error(
+            "Invalid payment response."
+          );
+        }
 
-
-        /* =====================================
+        /* ===============================================
            RAZORPAY OPTIONS
-        ===================================== */
+        =============================================== */
 
         const options = {
-  key: paymentData.key_id,
+          key:
+            paymentData.key_id,
 
-  amount: paymentData.amount,
+          amount:
+            paymentData.amount,
 
-  currency:
-    paymentData.currency || "INR",
+          currency:
+            paymentData.currency ||
+            "INR",
 
-  name: "Biryani House",
+          name:
+            "Wardrobe",
 
-  description:
-    "Biryani Order Payment",
+          description:
+            "Order Payment",
 
-  order_id:
-    paymentData.razorpay_order_id,
+          order_id:
+            paymentData
+              .razorpay_order_id,
 
-
-          /* =================================
+          /* =============================================
              PAYMENT SUCCESS
-          ================================= */
+          ============================================= */
 
           handler:
             async function (
               razorpayResponse
             ) {
-
               try {
+                const verifyResponse =
+                  await verifyPaymentApi(
+                    {
+                      order_id:
+                        paymentData.order_id,
 
-               const verifyResponse =
-  await verifyPaymentApi({
-    order_id:
-      paymentData.order_id,
+                      cart_id:
+                        cartId,
 
-    cart_id:
-      cartId,
+                      razorpay_order_id:
+                        razorpayResponse
+                          .razorpay_order_id,
 
-    razorpay_order_id:
-      razorpayResponse.razorpay_order_id,
+                      razorpay_payment_id:
+                        razorpayResponse
+                          .razorpay_payment_id,
 
-    razorpay_payment_id:
-      razorpayResponse.razorpay_payment_id,
-
-    razorpay_signature:
-      razorpayResponse.razorpay_signature,
-  });
-
+                      razorpay_signature:
+                        razorpayResponse
+                          .razorpay_signature,
+                    }
+                  );
 
                 if (
-  verifyResponse
-    ?.data
-    ?.success
-) {
+                  verifyResponse
+                    ?.data?.success
+                ) {
+                  const verified =
+                    verifyResponse
+                      ?.data?.data ||
+                    {};
 
-  const verifiedData =
-    verifyResponse
-      ?.data
-      ?.data || {};
+                  setSuccessOrder(
+                    {
+                      orderId:
+                        verified.order_id,
 
+                      paymentId:
+                        verified
+                          .razorpay_payment_id,
 
-  /* =================================
-     SUCCESS PAGE DATA
-  ================================= */
+                      paymentMethod:
+                        verified
+                          .payment_method ||
+                        "Razorpay",
 
-  setSuccessOrder({
-  orderId:
-    verifiedData.order_id,
+                      customerName:
+                        verified
+                          .customer_name ||
+                        customerName,
 
-  paymentId:
-    verifiedData.razorpay_payment_id,
+                      mobile:
+                        verified.mobile ||
+                        mobile,
 
-  paymentMethod:
-    verifiedData.payment_method ||
-    "Razorpay",
+                      totalAmount:
+                        Number(
+                          verified
+                            .total_amount ||
+                            totalAmount
+                        ),
+                    }
+                  );
 
-  customerName:
-    verifiedData.customer_name ||
-    customerName,
+                  /*
+                    Payment success only:
+                    clear complete cart.
+                  */
 
-  mobile:
-    verifiedData.mobile ||
-    mobile,
+                  setCart({});
 
-  totalAmount:
-    Number(
-      verifiedData.total_amount ||
-      totalAmount
-    ),
-});
+                  setCustomer({
+                    name: "",
+                    mobile: "",
+                    address: "",
+                  });
 
+                  setCartId(null);
 
-  /* =================================
-     CLEAR CURRENT CART UI
-  ================================= */
-
-  setQuantities({});
-
-
-  setCustomer({
-    name: "",
-    mobile: "",
-  });
-
-
-  setCartId(null);
-
-
-  setShowCheckout(false);
-
-
-
+                  setShowCheckout(
+                    false
+                  );
                 } else {
-
                   alert(
                     "Payment verification failed."
                   );
-
                 }
-
               } catch (
                 verifyError
               ) {
-
                 console.error(
                   "Payment verify error:",
                   verifyError
                 );
 
                 alert(
-                  verifyError
-                    ?.response
-                    ?.data
-                    ?.message ||
-                  "Payment verification failed."
+                  getErrorMessage(
+                    verifyError,
+                    "Payment verification failed."
+                  )
                 );
-
               } finally {
-
                 setPaymentLoading(
                   false
                 );
-
               }
-
             },
 
-
-          /* =================================
-             CUSTOMER DETAILS
-          ================================= */
+          /* PREFILL */
 
           prefill: {
-
             name:
               customerName,
 
             contact:
               mobile,
-
           },
 
-
-          /* =================================
-             THEME
-          ================================= */
+          /* THEME */
 
           theme: {
-
             color:
-              "#7c1114",
-
+              "#ee027e",
           },
 
-
-          /* =================================
-             USER CLOSES PAYMENT POPUP
-          ================================= */
+          /* PAYMENT CLOSE */
 
           modal: {
-
             ondismiss:
               function () {
-
                 setPaymentLoading(
                   false
                 );
-
               },
-
           },
-
         };
 
-
-        /* =====================================
-           OPEN RAZORPAY
-        ===================================== */
+        /* OPEN RAZORPAY */
 
         const razorpay =
           new window.Razorpay(
             options
           );
 
-
-        /* =====================================
-           PAYMENT FAILED
-        ===================================== */
+        /* PAYMENT FAILED */
 
         razorpay.on(
           "payment.failed",
-
-          function (response) {
-
+          function (failure) {
             console.error(
               "Razorpay payment failed:",
-              response.error
+              failure.error
             );
 
             alert(
-              response
-                ?.error
+              failure?.error
                 ?.description ||
-              "Payment failed. Please try again."
+                "Payment failed. Please try again."
             );
 
             setPaymentLoading(
               false
             );
-
           }
         );
 
-
         razorpay.open();
-
-
-      } catch (error) {
-
+      } catch (err) {
         console.error(
           "Payment error:",
-          error
+          err
         );
 
         alert(
-          error?.response
-            ?.data
-            ?.message ||
-          error?.message ||
-          "Unable to start payment."
+          getErrorMessage(
+            err,
+            "Unable to start payment."
+          )
         );
 
         setPaymentLoading(
           false
         );
-
       }
-
     };
 
+  /* =======================================================
+     SUCCESS PAGE
+  ======================================================= */
 
-
-    /* =======================================================
-   PAYMENT SUCCESS PAGE
-======================================================= */
-
-if (successOrder) {
-
-  return (
-
-    <main className="flex min-h-screen items-center justify-center bg-[#faf6f1] px-4">
-
-      <div className="w-full max-w-md rounded-[24px] border border-[#eadbd3] bg-white p-7 text-center shadow-xl">
-
-        {/* SUCCESS ICON */}
-
-        <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-green-50">
-
-          <svg
-            viewBox="0 0 24 24"
-            className="h-8 w-8 text-green-600"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.5"
-          >
-
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M5 12.5l4 4L19 7"
-            />
-
-          </svg>
-
-        </div>
-
-
-        {/* HEADING */}
-
-        <h1 className="mt-5 text-2xl font-black text-[#351b17]">
-
-          Payment Successful
-
-        </h1>
-
-
-        <p className="mt-2 text-sm leading-6 text-[#806c66]">
-
-          Your order has been placed successfully.
-          Thank you for ordering from Biryani House.
-
-        </p>
-
-
-        {/* ORDER DETAILS */}
-
-        <div className="mt-6 rounded-2xl bg-[#faf6f1] p-5 text-left">
-
-          <div className="flex items-center justify-between border-b border-[#eadbd3] pb-3">
-
-            <span className="text-sm text-[#806c66]">
-              Order ID
-            </span>
-
-            <span className="text-sm font-bold text-[#351b17]">
-
-              #
-              {
-                successOrder
-                  .orderId
-              }
-
-            </span>
-
-          </div>
-
-
-          <div className="flex items-center justify-between border-b border-[#eadbd3] py-3">
-
-            <span className="text-sm text-[#806c66]">
-              Payment Method
-            </span>
-
-            <span className="text-sm font-bold capitalize text-[#351b17]">
-
-              {
-                successOrder
-                  .paymentMethod
-              }
-
-            </span>
-
-          </div>
-
-
-          <div className="flex items-center justify-between pt-3">
-
-            <span className="text-sm font-semibold text-[#351b17]">
-              Amount Paid
-            </span>
-
-            <span className="text-lg font-black text-[#8f1115]">
-
-              ₹
-              {
-                Number(
-                  successOrder
-                    .totalAmount ||
-                  0
-                ).toLocaleString(
-                  "en-IN"
-                )
-              }
-
-            </span>
-
-          </div>
-
-        </div>
-
-
-        {/* BUTTON */}
-
-        <button
-          type="button"
-          onClick={() => {
-
-            setSuccessOrder(null);
-
-          }}
-          className="mt-6 w-full rounded-xl bg-[#bf0000] px-5 py-3.5 text-sm font-bold text-white transition hover:bg-[#a50000]"
-          // className="mt-6 w-full rounded-xl bg-[#8f1115] px-5 py-3.5 text-sm font-bold text-white transition hover:bg-[#741014]"
+  if (successOrder) {
+    return (
+      <main
+        className="
+          flex
+          min-h-screen
+          items-center
+          justify-center
+          bg-[#fffafa]
+          px-4
+        "
+      >
+        <div
+          className="
+            w-full
+            max-w-md
+            rounded-[24px]
+            border
+            border-[#ee027e]/10
+            bg-white
+            p-7
+            text-center
+            shadow-xl
+          "
         >
+          {/* SUCCESS ICON */}
 
-          Order More
-
-        </button>
-
-      </div>
-
-    </main>
-
-  );
-
-}
-
-  return (
-
-    // <div className="min-h-screen bg-[#f8f4ef] pb-28">
-    <div className="min-h-screen bg-[#fffafa] pb-28">
-
-      {/* ==================================================
-          HEADER
-      ================================================== */}
-
-      {/* <header className="sticky top-0 z-40 border-b border-[#eadbd4] bg-white"> */}
-          <header className="sticky top-0 z-40 border-b border-[#bf0000]/10 bg-white shadow-sm">
-
-        {/* <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 sm:px-6 lg:px-8"> */}
-            <div className="mx-auto flex min-h-[78px] max-w-6xl items-center justify-between px-4 py-2 sm:px-6 lg:px-8">
-
-          {/* LOGO */}
-          <div className="flex items-center">
-            <img
-              src="/vaibhavi.png"
-              alt="Vaibhavi"
-              className="h-[62px] w-auto max-w-[200px] object-contain sm:h-[68px] sm:max-w-[220px]"
-            />
-          </div>
-          {/* <div className="flex items-center gap-3">
-
-            <div className="flex h-11 w-11 items-center justify-center rounded-full bg-[#7c1114] text-white">
-
-              <UtensilsCrossed
-                size={21}
+          <div
+            className="
+              mx-auto
+              flex
+              h-16
+              w-16
+              items-center
+              justify-center
+              rounded-full
+              bg-green-50
+            "
+          >
+            <svg
+              viewBox="0 0 24 24"
+              className="
+                h-8
+                w-8
+                text-green-600
+              "
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M5 12.5l4 4L19 7"
               />
-
-            </div>
-
-
-            <div>
-
-              <h1 className="text-[17px] font-extrabold leading-tight text-[#7c1114] sm:text-xl">
-                Biryani House
-              </h1>
-
-              <p className="mt-0.5 text-[9px] font-semibold tracking-[0.16em] text-[#9b6c57]">
-                AUTHENTIC DUM BIRYANI
-              </p>
-
-            </div>
-
-          </div> */}
-
-
-          {/* CART */}
-
-          {/* <div className="flex items-center gap-2 rounded-full bg-[#f8eeee] px-3 py-2 text-[#7c1114]"> */}
-              <div className="flex items-center gap-2 rounded-full bg-[#bf0000]/10 px-3 py-2 text-[#bf0000]">
-            <ShoppingCart
-              size={17}
-            />
-
-            <span className="text-sm font-bold">
-              {totalQuantity}
-            </span>
-
+            </svg>
           </div>
 
-        </div>
+          <h1
+            className="
+              mt-5
+              text-2xl
+              font-black
+              text-slate-900
+            "
+          >
+            Payment Successful
+          </h1>
 
-      </header>
-
-
-      {/* ==================================================
-          MAIN
-      ================================================== */}
-
-      <main className="mx-auto max-w-6xl px-3 pb-8 pt-5 sm:px-6 sm:pt-7 lg:px-8">
-
-
-        {/* MENU HEADING */}
-
-        <div className="mb-4">
-
-          <p className="text-[12px] font-extrabold uppercase tracking-[0.25em] text-[#bf0000]">
-          {/* <p className="text-[12px] font-extrabold uppercase tracking-[0.25em] text-[#a66043]"> */}
-            Our Menu
+          <p
+            className="
+              mt-2
+              text-sm
+              leading-6
+              text-slate-500
+            "
+          >
+            Your order has been
+            placed successfully.
+            Thank you for shopping
+            with Wardrobe.
           </p>
 
-        </div>
+          {/* ORDER DETAILS */}
 
+          <div
+            className="
+              mt-6
+              rounded-2xl
+              bg-[#fff8f8]
+              p-5
+              text-left
+            "
+          >
+            {/* ORDER ID */}
 
-        {/* ==================================================
-            TABLE
-        ================================================== */}
-
-        <div className="w-full">
-
-
-          {/* ================================================
-              DESKTOP / TABLET HEADER
-          ================================================ */}
-
-          <div 
-           className="hidden grid-cols-[minmax(250px,1fr)_130px_120px_170px] items-center border-b-2 border-[#bf0000] px-2 py-3 text-sm font-bold text-[#bf0000] sm:grid">
-           {/* className="hidden grid-cols-[minmax(250px,1fr)_130px_120px_170px] items-center border-b-2 border-[#7c1114] px-2 py-3 text-sm font-bold text-[#7c1114] sm:grid"> */}
-
-            <div>
-              Biryani
-            </div>
-
-            <div>
-              Portion
-            </div>
-
-            <div>
-              Price
-            </div>
-
-            <div className="text-center">
-              Quantity
-            </div>
-
-          </div>
-
-
-          {/* ================================================
-              LOADING
-          ================================================ */}
-
-          {loading && (
-
-            <div className="py-12 text-center">
-
-              <p className="text-sm font-semibold text-[#92766c]">
-                Loading menu...
-              </p>
-
-            </div>
-
-          )}
-
-
-          {/* ================================================
-              ERROR
-          ================================================ */}
-
-          {!loading &&
-            menuError && (
-
-            <div className="py-12 text-center">
-
-              <p className="text-sm font-semibold text-red-600">
-                {menuError}
-              </p>
-
-              <button
-                type="button"
-                onClick={loadMenu}
-                className="mt-3 text-sm font-bold text-[#7c1114]"
+            <div
+              className="
+                flex
+                items-center
+                justify-between
+                border-b
+                border-[#ee027e]/10
+                pb-3
+              "
+            >
+              <span
+                className="
+                  text-sm
+                  text-slate-500
+                "
               >
-                Try Again
-              </button>
+                Order ID
+              </span>
 
+              <span
+                className="
+                  text-sm
+                  font-bold
+                  text-slate-900
+                "
+              >
+                #
+                {
+                  successOrder.orderId
+                }
+              </span>
             </div>
 
-          )}
+            {/* PAYMENT METHOD */}
 
+            <div
+              className="
+                flex
+                items-center
+                justify-between
+                border-b
+                border-[#ee027e]/10
+                py-3
+              "
+            >
+              <span
+                className="
+                  text-sm
+                  text-slate-500
+                "
+              >
+                Payment Method
+              </span>
 
-          {/* ================================================
-              EMPTY
-          ================================================ */}
-
-          {!loading &&
-            !menuError &&
-            menuData.length ===
-              0 && (
-
-            <div className="py-12 text-center">
-
-              <p className="text-sm font-semibold text-[#92766c]">
-                No menu items available.
-              </p>
-
+              <span
+                className="
+                  text-sm
+                  font-bold
+                  capitalize
+                  text-slate-900
+                "
+              >
+                {
+                  successOrder
+                    .paymentMethod
+                }
+              </span>
             </div>
 
-          )}
+            {/* AMOUNT */}
 
+            <div
+              className="
+                flex
+                items-center
+                justify-between
+                pt-3
+              "
+            >
+              <span
+                className="
+                  font-bold
+                  text-slate-900
+                "
+              >
+                Amount Paid
+              </span>
 
-          {/* ================================================
-              MENU ROWS
-          ================================================ */}
-
-          {!loading &&
-            !menuError &&
-            menuData.map(
-              (
-                item,
-                index
-              ) => {
-
-                const quantity =
-                  quantities[
-                    item.id
-                  ] || 0;
-
-                return (
-
-                  <div
-                    key={item.id}
-                    className={`grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 py-4 sm:grid-cols-[minmax(250px,1fr)_130px_120px_170px] ${
-                      index !==
-                      menuData.length -
-                        1
-                        ? "border-b border-[#e5d6cf]"
-                        : ""
-                    }`}
-                  >
-
-
-                    {/* NAME */}
-
-                    <div className="min-w-0">
-
-                      <h3 className="truncate text-[14px] font-bold text-[#351715] sm:text-[15px]">
-                        {item.name}
-                      </h3>
-
-
-                      {/* MOBILE PORTION + PRICE */}
-
-                      <div className="mt-1.5 flex items-center gap-2 sm:hidden">
-
-                        <span className="rounded-md bg-[#bf0000]/10 px-2 py-1 text-[11px] font-semibold text-[#bf0000]">
-                        {/* <span className="rounded-md bg-[#f8eeee] px-2 py-1 text-[11px] font-semibold text-[#7c1114]"> */}
-                          {item.portion}
-                        </span>
-
-                        {/* <span className="text-[14px] font-extrabold text-[#7c1114]"> */}
-                        <span className="text-[14px] font-extrabold text-[#bf0000]">
-                          ₹
-                          {Number(
-                            item.amount
-                          )}
-                        </span>
-
-                      </div>
-
-                    </div>
-
-
-                    {/* DESKTOP PORTION */}
-
-                    <div className="hidden sm:block">
-
-                      <span className="text-sm font-semibold text-[#62483f]">
-                        {item.portion}
-                      </span>
-
-                    </div>
-
-
-                    {/* DESKTOP PRICE */}
-
-                    <div className="hidden sm:block">
-
-                      <span 
-                      // className="text-[15px] font-extrabold text-[#7c1114]"
-                      className="text-[15px] font-extrabold text-[#bf0000]">
-                        ₹
-                        {Number(
-                          item.amount
-                        )}
-                      </span>
-
-                    </div>
-
-
-                    {/* QUANTITY */}
-
-                    <div className="flex justify-end sm:justify-center">
-
-                      <div 
-                      // className="flex items-center rounded-lg border border-[#dfcbc3] bg-white p-1"
-                      className="flex items-center rounded-lg border border-[#bf0000]/20 bg-white p-1">
-
-
-                        {/* MINUS */}
-
-                        <button
-                          type="button"
-                          disabled={
-                            quantity ===
-                            0
-                          }
-                          onClick={() =>
-                            decreaseQuantity(
-                              item.id
-                            )
-                          }
-                          className="flex h-8 w-8 items-center justify-center rounded-md text-[#bf0000] transition hover:bg-[#bf0000]/10 disabled:opacity-30"
-                          // className="flex h-8 w-8 items-center justify-center rounded-md text-[#7c1114] transition hover:bg-[#f9eeee] disabled:opacity-30"
-                        >
-
-                          <Minus
-                            size={15}
-                          />
-
-                        </button>
-
-
-                        {/* NUMBER */}
-
-                        <span className="w-8 text-center text-[14px] font-black text-[#351715]">
-                          {quantity}
-                        </span>
-
-
-                        {/* PLUS */}
-
-                        <button
-                          type="button"
-                          onClick={() =>
-                            increaseQuantity(
-                              item.id
-                            )
-                          }
-                          className="flex h-8 w-8 items-center justify-center rounded-md bg-[#bf0000] text-white transition hover:bg-[#a50000]"
-                          // className="flex h-8 w-8 items-center justify-center rounded-md bg-[#7c1114] text-white transition hover:bg-[#5f0e10]"
-                        >
-
-                          <Plus
-                            size={15}
-                          />
-
-                        </button>
-
-                      </div>
-
-                    </div>
-
-                  </div>
-
-                );
-
-              }
-            )}
-
-        </div>
-
-      </main>
-
-
-      {/* ==================================================
-          BOTTOM CART
-      ================================================== */}
-
-      <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-[#eadbd4] bg-white px-3 py-3 shadow-[0_-5px_20px_rgba(60,20,15,0.08)] sm:px-6">
-
-        <div className="mx-auto flex max-w-6xl items-center gap-3">
-
-          <div className="min-w-[72px]">
-
-            <p className="text-[10px] text-[#91776e]">
-
-              {totalQuantity}{" "}
-
-              {totalQuantity === 1
-                ? "item"
-                : "items"}
-
-            </p>
-
-            <p className="text-xl font-black leading-tight text-[#351715]">
-              ₹{totalAmount}
-            </p>
-
+              <span
+                className="
+                  text-xl
+                  font-black
+                  text-[#ee027e]
+                "
+              >
+                ₹
+                {formatINR(
+                  successOrder
+                    .totalAmount
+                )}
+              </span>
+            </div>
           </div>
 
+          {/* CONTINUE */}
 
           <button
             type="button"
-            disabled={
-              totalQuantity === 0 ||
-              cartLoading
-            }
-            onClick={
-              handleAddToCart
-            }
-            className="flex h-12 flex-1 items-center justify-center gap-2 rounded-xl bg-[#bf0000] px-4 text-sm font-bold text-white shadow-md transition hover:bg-[#a50000] disabled:cursor-not-allowed disabled:bg-[#d99a9a]"
-            // className="flex h-12 flex-1 items-center justify-center gap-2 rounded-xl bg-[#7c1114] px-4 text-sm font-bold text-white shadow-md transition hover:bg-[#5f0e10] disabled:cursor-not-allowed disabled:bg-[#bc8d8e]"
-          >
-
-            <ShoppingCart
-              size={18}
-            />
-
-            {cartLoading
-              ? "Adding..."
-              : "Add to Cart"}
-
-          </button>
-
-        </div>
-
-      </div>
-
-
-      {/* ==================================================
-          CHECKOUT POPUP
-      ================================================== */}
-
-      {showCheckout && (
-
-        <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 backdrop-blur-[2px] sm:items-center sm:p-4"
-          onClick={() => {
-
-            if (
-              !paymentLoading
-            ) {
-              setShowCheckout(
-                false
+            onClick={() => {
+              setSuccessOrder(
+                null
               );
-            }
 
-          }}
-        >
+              backToHome();
+            }}
+            className="
+              mt-6
+              w-full
+              rounded-xl
+              bg-[#ee027e]
+              px-5
+              py-3.5
+              text-sm
+              font-bold
+              text-white
+              transition
+              hover:bg-[#c90069]
+            "
+          >
+            Continue Shopping
+          </button>
+        </div>
+      </main>
+    );
+  }
 
+  /* =======================================================
+     MAIN PAGE
+  ======================================================= */
+
+  return (
+    <div
+      className="
+        min-h-screen
+        bg-[#fffafa]
+        pb-28
+      "
+    >
+      {/* =================================================
+          REUSABLE HEADER
+      ================================================= */}
+
+      <Header
+        totalQuantity={
+          totalQuantity
+        }
+        onHome={
+          backToHome
+        }
+        onContact={() =>
+          setShowContactPopup(
+            true
+          )
+        }
+      />
+
+      {/* =================================================
+          MAIN CONTENT
+      ================================================= */}
+
+      <main
+        className="
+          mx-auto
+          max-w-6xl
+          px-4
+          pb-8
+          pt-4
+          sm:px-6
+          lg:px-8
+        "
+      >
+        {/* =================================================
+            CATEGORIES
+        ================================================= */}
+
+        {!selectedProduct && (
+          <section
+            className="
+              rounded-2xl
+              bg-[#f6efef]
+              px-2
+              py-4
+            "
+          >
+            <div
+              className="
+                flex
+                gap-4
+                overflow-x-auto
+                px-2
+                pb-1
+                [scrollbar-width:none]
+                [&::-webkit-scrollbar]:hidden
+              "
+            >
+              {/* LOADING */}
+
+              {loading &&
+                Array.from({
+                  length: 7,
+                }).map(
+                  (
+                    _,
+                    index
+                  ) => (
+                    <div
+                      key={
+                        index
+                      }
+                      className="
+                        flex
+                        w-[78px]
+                        shrink-0
+                        flex-col
+                        items-center
+                        gap-2
+                      "
+                    >
+                      <div
+                        className="
+                          h-[78px]
+                          w-[78px]
+                          animate-pulse
+                          rounded-2xl
+                          bg-white
+                        "
+                      />
+
+                      <div
+                        className="
+                          h-3
+                          w-12
+                          animate-pulse
+                          rounded
+                          bg-white
+                        "
+                      />
+                    </div>
+                  )
+                )}
+
+              {/* CATEGORY ITEMS */}
+
+              {!loading &&
+                categories.map(
+                  (category) => {
+                    const active =
+                      activeCategory
+                        ?.id ===
+                      category.id;
+
+                    return (
+                      <button
+                        key={
+                          category.id
+                        }
+                        type="button"
+                        onClick={() =>
+                          openCategory(
+                            category
+                          )
+                        }
+                        className="
+                          flex
+                          w-[78px]
+                          shrink-0
+                          flex-col
+                          items-center
+                          gap-2
+                          text-center
+                        "
+                      >
+                        {/* IMAGE */}
+
+                        <span
+                          className={`
+                            block
+                            h-[78px]
+                            w-[78px]
+                            overflow-hidden
+                            rounded-2xl
+                            bg-white
+                            ring-2
+                            transition
+
+                            ${
+                              active
+                                ? "ring-[#ee027e]"
+                                : "ring-transparent"
+                            }
+                          `}
+                        >
+                          {category.image_url ? (
+                            <img
+                              src={
+                                category.image_url
+                              }
+                              alt={
+                                category.name
+                              }
+                              className="
+                                h-full
+                                w-full
+                                object-cover
+                              "
+                            />
+                          ) : (
+                            <span
+                              className="
+                                flex
+                                h-full
+                                w-full
+                                bg-white
+                              "
+                            />
+                          )}
+                        </span>
+
+                        {/* NAME */}
+
+                        <span
+                          className={`
+                            text-[13px]
+                            leading-tight
+
+                            ${
+                              active
+                                ? "font-bold text-[#ee027e]"
+                                : "font-medium text-slate-700"
+                            }
+                          `}
+                        >
+                          {
+                            category.name
+                          }
+                        </span>
+                      </button>
+                    );
+                  }
+                )}
+            </div>
+          </section>
+        )}
+
+        {/* =================================================
+            ERROR
+        ================================================= */}
+
+        {error && (
           <div
-            className="max-h-[92vh] w-full overflow-y-auto rounded-t-[26px] bg-white p-5 shadow-2xl sm:max-w-md sm:rounded-[24px] sm:p-6"
+            className="
+              py-10
+              text-center
+            "
+          >
+            <p
+              className="
+                text-sm
+                font-semibold
+                text-red-600
+              "
+            >
+              {error}
+            </p>
+
+            <button
+              type="button"
+              onClick={
+                activeCategory
+                  ? () =>
+                      openCategory(
+                        activeCategory
+                      )
+                  : loadHome
+              }
+              className="
+                mt-3
+                text-sm
+                font-bold
+                text-[#ee027e]
+              "
+            >
+              Try again
+            </button>
+          </div>
+        )}
+
+        {/* =================================================
+            RECENTLY ADDED
+        ================================================= */}
+
+        {!activeCategory &&
+          !selectedProduct &&
+          !error && (
+            <section
+              className="
+                mt-6
+              "
+            >
+              <div
+                className="
+                  mb-4
+                "
+              >
+                <h2
+                  className="
+                    text-xl
+                    font-black
+                    text-slate-900
+                    sm:text-2xl
+                  "
+                >
+                  Recently added
+                </h2>
+              </div>
+
+              {/* LOADING */}
+
+              {loading ? (
+                <ProductGridSkeleton />
+              ) : recentProducts.length >
+                0 ? (
+                <div
+                  className="
+                    grid
+                    grid-cols-2
+                    gap-3
+                    sm:gap-4
+                    md:grid-cols-3
+                    lg:grid-cols-4
+                  "
+                >
+                  {recentProducts.map(
+                    (product) => (
+                      <ProductCard
+                        key={
+                          product.id
+                        }
+                        product={
+                          product
+                        }
+                        onView={
+                          openProduct
+                        }
+                      />
+                    )
+                  )}
+                </div>
+              ) : (
+                <div
+                  className="
+                    rounded-2xl
+                    bg-white
+                    py-12
+                    text-center
+                  "
+                >
+                  <p
+                    className="
+                      text-sm
+                      font-medium
+                      text-slate-500
+                    "
+                  >
+                    No recently added
+                    products available.
+                  </p>
+                </div>
+              )}
+            </section>
+          )}
+
+        {/* =================================================
+            CATEGORY PRODUCTS
+        ================================================= */}
+
+        {activeCategory &&
+          !selectedProduct &&
+          !error && (
+            <section
+              className="
+                mt-6
+              "
+            >
+              {/* TITLE */}
+
+              <div
+                className="
+                  mb-5
+                  flex
+                  items-center
+                  gap-3
+                "
+              >
+                <button
+                  type="button"
+                  onClick={
+                    backToHome
+                  }
+                  className="
+                    flex
+                    h-10
+                    w-10
+                    shrink-0
+                    items-center
+                    justify-center
+                    rounded-full
+                    bg-[#ee027e]/10
+                    text-[#ee027e]
+                    transition
+                    hover:bg-[#ee027e]
+                    hover:text-white
+                  "
+                  aria-label="Back to home"
+                >
+                  <ArrowLeft
+                    size={18}
+                  />
+                </button>
+
+                <h2
+                  className="
+                    text-xl
+                    font-black
+                    text-slate-900
+                    sm:text-2xl
+                  "
+                >
+                  {
+                    activeCategory
+                      .name
+                  }
+                </h2>
+              </div>
+
+              {/* LOADING */}
+
+              {productsLoading && (
+                <ProductGridSkeleton />
+              )}
+
+              {/* EMPTY */}
+
+              {!productsLoading &&
+                categoryProducts.length ===
+                  0 && (
+                  <div
+                    className="
+                      rounded-2xl
+                      bg-white
+                      py-14
+                      text-center
+                    "
+                  >
+                    <p
+                      className="
+                        text-sm
+                        font-semibold
+                        text-slate-500
+                      "
+                    >
+                      No products in{" "}
+                      {
+                        activeCategory
+                          .name
+                      }{" "}
+                      yet.
+                    </p>
+                  </div>
+                )}
+
+              {/* PRODUCTS */}
+
+              {!productsLoading &&
+                categoryProducts.length >
+                  0 && (
+                  <div
+                    className="
+                      grid
+                      grid-cols-2
+                      gap-3
+                      sm:gap-4
+                      md:grid-cols-3
+                      lg:grid-cols-4
+                    "
+                  >
+                    {categoryProducts.map(
+                      (product) => (
+                        <ProductCard
+                          key={
+                            product.id
+                          }
+                          product={
+                            product
+                          }
+                          onView={
+                            openProduct
+                          }
+                        />
+                      )
+                    )}
+                  </div>
+                )}
+            </section>
+          )}
+
+        {/* =================================================
+            PRODUCT DETAILS
+        ================================================= */}
+
+        {selectedProduct &&
+          !error && (
+            <section
+              className="
+                mt-2
+              "
+            >
+              <ProductDetails
+                product={
+                  selectedProduct
+                }
+                similarProducts={
+                  similarProducts
+                }
+                onBack={
+                  activeCategory
+                    ? backToProducts
+                    : backToHome
+                }
+                onAdd={
+                  addToCart
+                }
+                onViewProduct={
+                  openProduct
+                }
+              />
+            </section>
+          )}
+      </main>
+
+      {/* =================================================
+          BOTTOM CART BAR
+      ================================================= */}
+
+      {totalQuantity > 0 &&
+        !showCheckout && (
+          <div
+            className="
+              fixed
+              bottom-0
+              left-0
+              right-0
+              z-40
+              border-t
+              border-[#ee027e]/10
+              bg-white
+              px-3
+              py-3
+              shadow-[0_-5px_20px_rgba(60,20,15,0.08)]
+              sm:px-6
+            "
+          >
+            <div
+              className="
+                mx-auto
+                flex
+                max-w-6xl
+                items-center
+                gap-3
+              "
+            >
+              {/* TOTAL */}
+
+              <div
+                className="
+                  min-w-[72px]
+                "
+              >
+                <p
+                  className="
+                    text-[10px]
+                    text-slate-500
+                  "
+                >
+                  {totalQuantity}{" "}
+                  {totalQuantity === 1
+                    ? "item"
+                    : "items"}
+                </p>
+
+                <p
+                  className="
+                    text-xl
+                    font-black
+                    leading-tight
+                    text-slate-900
+                  "
+                >
+                  ₹
+                  {formatINR(
+                    totalAmount
+                  )}
+                </p>
+              </div>
+
+              {/* CHECKOUT */}
+
+              <button
+                type="button"
+                disabled={
+                  cartLoading
+                }
+                onClick={
+                  handleCheckout
+                }
+                className="
+                  flex
+                  h-12
+                  flex-1
+                  items-center
+                  justify-center
+                  gap-2
+                  rounded-xl
+                  bg-[#ee027e]
+                  px-4
+                  text-sm
+                  font-bold
+                  text-white
+                  shadow-md
+                  transition
+                  hover:bg-[#c90069]
+                  disabled:cursor-not-allowed
+                  disabled:opacity-60
+                "
+              >
+                <ShoppingCart
+                  size={18}
+                />
+
+                {cartLoading
+                  ? "Saving cart..."
+                  : "View Cart & Checkout"}
+              </button>
+            </div>
+          </div>
+        )}
+
+      {/* =================================================
+          CONTACT POPUP
+      ================================================= */}
+
+      {showContactPopup && (
+        <div
+          className="
+            fixed
+            inset-0
+            z-[70]
+            flex
+            items-center
+            justify-center
+            bg-black/50
+            px-4
+            backdrop-blur-[2px]
+          "
+          onClick={() =>
+            setShowContactPopup(
+              false
+            )
+          }
+        >
+          <div
+            className="
+              relative
+              w-full
+              max-w-[360px]
+              overflow-hidden
+              rounded-[20px]
+              bg-white
+              px-5
+              pb-5
+              pt-5
+              text-center
+              shadow-[0_20px_60px_rgba(0,0,0,0.22)]
+              sm:max-w-[410px]
+              sm:rounded-[24px]
+              sm:px-6
+              sm:pb-6
+              sm:pt-6
+            "
             onClick={(event) =>
               event.stopPropagation()
             }
           >
+            {/* CLOSE */}
 
+            <button
+              type="button"
+              onClick={() =>
+                setShowContactPopup(
+                  false
+                )
+              }
+              className="
+                absolute
+                right-3
+                top-3
+                z-10
+                flex
+                h-8
+                w-8
+                items-center
+                justify-center
+                rounded-full
+                bg-[#fff0f7]
+                text-[#ee027e]
+                transition
+                hover:bg-[#ee027e]
+                hover:text-white
+                sm:right-4
+                sm:top-4
+                sm:h-9
+                sm:w-9
+              "
+              aria-label="Close"
+            >
+              <X
+                className="
+                  h-4
+                  w-4
+                "
+              />
+            </button>
 
-            {/* MOBILE LINE */}
+            {/* LOGO */}
 
-            <div className="mx-auto mb-4 h-1.5 w-11 rounded-full bg-[#e4d3cc] sm:hidden" />
-
-
-            {/* HEADER */}
-
-            <div className="flex items-start justify-between gap-4">
-
-              <div>
-
-                {/* <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#a66043]">
-                  Checkout
-                </p> */}
-                <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#bf0000]">
-                  Checkout
-                </p>
-
-                {/* <h2 className="mt-1 text-xl font-black text-[#351715] sm:text-2xl"> */}
-                <h2 className="mt-1 text-xl font-black text-slate-900 sm:text-2xl">
-                  Complete Your Order
-                </h2>
-
-              </div>
-
-
-              <button
-                type="button"
-                disabled={
-                  paymentLoading
-                }
-                onClick={() =>
-                  setShowCheckout(
-                    false
-                  )
-                }
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#bf0000]/10 text-[#bf0000] transition hover:bg-[#bf0000]/15 disabled:opacity-50"
-                // className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#f8eeee] text-[#7c1114] disabled:opacity-50"
-              >
-
-                <X size={18} />
-
-              </button>
-
+            <div
+              className="
+                flex
+                justify-center
+                px-8
+              "
+            >
+              <img
+                src="/vaibhavi.png"
+                alt="The Wardrobe"
+                className="
+                  h-[75px]
+                  w-auto
+                  max-w-[190px]
+                  object-contain
+                  sm:h-[85px]
+                  sm:max-w-[220px]
+                "
+              />
             </div>
 
+            {/* ADDRESS */}
 
-            {/* ==============================================
-                ORDER SUMMARY
-            ============================================== */}
-
-            <div 
-            // className="mt-5 rounded-2xl bg-[#faf5f2] p-4"
-            className="mt-5 rounded-2xl border border-[#bf0000]/10 bg-[#fff8f8] p-4">
-
-              {/* <p className="mb-3 text-sm font-bold text-[#351715]"> */}
-              <p className="mb-3 text-sm font-bold text-slate-900">
-                Order Summary
+            <div
+              className="
+                mt-3
+                rounded-xl
+                border
+                border-[#ee027e]/10
+                bg-[#fff8fb]
+                px-4
+                py-3.5
+                sm:mt-4
+                sm:px-5
+                sm:py-4
+              "
+            >
+              <p
+                className="
+                  text-[10px]
+                  font-extrabold
+                  uppercase
+                  tracking-[0.12em]
+                  text-[#ee027e]
+                  sm:text-[11px]
+                "
+              >
+                Our Address
               </p>
 
-
-              <div className="space-y-3">
-
-                {selectedItems.map(
-                  (item) => (
-
-                    <div
-                      key={item.id}
-                      className="flex items-start justify-between gap-3"
-                    >
-
-                      <div>
-
-                        {/* <p className="text-sm font-semibold text-[#4b2a25]"> */}
-                        <p className="text-sm font-semibold text-slate-800">
-                          {item.name}
-                        </p>
-
-                        {/* <p className="mt-0.5 text-xs text-[#92766c]"> */}
-                        <p className="mt-0.5 text-xs text-slate-500">
-                          {item.portion}
-                          {" × "}
-                          {item.quantity}
-                        </p>
-
-                      </div>
-
-
-                      {/* <p className="text-sm font-bold text-[#7c1114]"> */}
-                      <p className="text-sm font-bold text-[#bf0000]">
-                        ₹{item.total}
-                      </p>
-
-                    </div>
-
-                  )
-                )}
-
-              </div>
-
-
-              {/* TOTAL */}
-
-              {/* <div className="mt-4 flex items-center justify-between border-t border-[#e8d8d1] pt-3"> */}
-              <div className="mt-4 flex items-center justify-between border-t border-[#bf0000]/15 pt-3">
-
-                {/* <span className="font-bold text-[#351715]"> */}
-                <span className="font-bold text-slate-900">
-                  Total
-                </span>
-
-                {/* <span className="text-xl font-black text-[#7c1114]"> */}
-                <span className="text-xl font-black text-[#bf0000]">
-                  ₹{totalAmount}
-                </span>
-
-              </div>
-
+              <p
+                className="
+                  mt-1.5
+                  text-[12px]
+                  font-medium
+                  leading-5
+                  text-slate-700
+                  sm:text-[13px]
+                  sm:leading-6
+                "
+              >
+                The wardrobe,Plot no 324 ,road 10, sai township, manneguda,501510, rangareddy, hyderabad
+              </p>
             </div>
 
+            {/* BUTTONS */}
 
-            {/* ==============================================
-                FORM
-            ============================================== */}
-
-            <form
-              onSubmit={
-                handlePayNow
-              }
-              className="mt-5 space-y-4"
+            <div
+              className="
+                mt-4
+                grid
+                grid-cols-2
+                gap-2.5
+                sm:mt-5
+                sm:gap-3
+              "
             >
+              {/* CALL */}
 
-
-              {/* NAME */}
-
-              <div>
-
-                {/* <label className="mb-1.5 block text-sm font-semibold text-[#4a2c27]"> */}
-                <label className="mb-1.5 block text-sm font-semibold text-slate-700">
-                  Your Name
-                </label>
-
-                <input
-                  type="text"
-                  value={
-                    customer.name
-                  }
-                  disabled={
-                    paymentLoading
-                  }
-                  onChange={(
-                    event
-                  ) =>
-                    setCustomer(
-                      (
-                        previous
-                      ) => ({
-                        ...previous,
-
-                        name:
-                          event
-                            .target
-                            .value,
-                      })
-                    )
-                  }
-                  placeholder="Enter your name"
-                  className="h-12 w-full rounded-xl border border-slate-300 px-4 text-sm text-slate-800 outline-none transition focus:border-[#bf0000] focus:ring-2 focus:ring-[#bf0000]/10 disabled:bg-slate-50"
-                  // className="h-12 w-full rounded-xl border border-[#ddccc5] px-4 text-sm outline-none transition focus:border-[#7c1114] focus:ring-2 focus:ring-[#7c1114]/10 disabled:bg-slate-50"
-                />
-
-              </div>
-
-
-              {/* MOBILE */}
-
-              <div>
-
-                {/* <label className="mb-1.5 block text-sm font-semibold text-[#4a2c27]"> */}
-                <label className="mb-1.5 block text-sm font-semibold text-slate-700">
-                  Mobile Number
-                </label>
-
-                <input
-                  type="tel"
-                  inputMode="numeric"
-                  maxLength={10}
-                  value={
-                    customer.mobile
-                  }
-                  disabled={
-                    paymentLoading
-                  }
-                  onChange={(
-                    event
-                  ) =>
-                    setCustomer(
-                      (
-                        previous
-                      ) => ({
-                        ...previous,
-
-                        mobile:
-                          event
-                            .target
-                            .value
-                            .replace(
-                              /\D/g,
-                              ""
-                            ),
-                      })
-                    )
-                  }
-                  placeholder="Enter 10-digit mobile number"
-                  className="h-12 w-full rounded-xl border border-slate-300 px-4 text-sm text-slate-800 outline-none transition focus:border-[#bf0000] focus:ring-2 focus:ring-[#bf0000]/10 disabled:bg-slate-50"
-                  // className="h-12 w-full rounded-xl border border-[#ddccc5] px-4 text-sm outline-none transition focus:border-[#7c1114] focus:ring-2 focus:ring-[#7c1114]/10 disabled:bg-slate-50"
-                />
-
-              </div>
-
-
-              {/* PAY NOW */}
-
-              <button
-                type="submit"
-                disabled={
-                  paymentLoading
-                }
-                className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#bf0000] font-bold text-white shadow-md transition hover:bg-[#a50000] disabled:cursor-not-allowed disabled:opacity-60"
-                // className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#7c1114] font-bold text-white shadow-md transition hover:bg-[#5f0e10] disabled:cursor-not-allowed disabled:opacity-60"
+              <a
+                href="tel:+919640364184"
+                className="
+                  flex
+                  h-11
+                  min-w-0
+                  items-center
+                  justify-center
+                  gap-1.5
+                  rounded-[10px]
+                  bg-[#ee027e]
+                  px-2
+                  text-[11px]
+                  font-bold
+                  text-white
+                  shadow-sm
+                  transition
+                  hover:bg-[#c90069]
+                  sm:h-12
+                  sm:text-xs
+                "
               >
-
-                <CreditCard
-                  size={18}
+                <Phone
+                  className="
+                    h-4
+                    w-4
+                    shrink-0
+                  "
                 />
 
-                {paymentLoading
-                  ? "Please wait..."
-                  : `Pay Now ₹${totalAmount}`}
+                Call Now
+              </a>
 
-              </button>
+              {/* WHATSAPP */}
 
-            </form>
+              <a
+                href="https://wa.me/919640364184?text=Hello%20The%20Wardrobe%2C%20I%20would%20like%20to%20know%20more%20about%20your%20products."
+                target="_blank"
+                rel="noopener noreferrer"
+                className="
+                  flex
+                  h-11
+                  min-w-0
+                  items-center
+                  justify-center
+                  gap-1.5
+                  rounded-[10px]
+                  bg-[#25D366]
+                  px-2
+                  text-[11px]
+                  font-bold
+                  text-white
+                  shadow-sm
+                  transition
+                  hover:bg-[#1ebe5d]
+                  sm:h-12
+                  sm:text-xs
+                "
+              >
+                <svg
+                  viewBox="0 0 32 32"
+                  fill="currentColor"
+                  className="
+                    h-[17px]
+                    w-[17px]
+                    shrink-0
+                  "
+                  aria-hidden="true"
+                >
+                  <path d="M16.04 2.003c-7.72 0-13.998 6.278-13.998 14 0 2.47.644 4.88 1.868 7.002L1.93 30.22l7.38-1.936A13.93 13.93 0 0 0 16.04 30c7.72 0 14-6.278 14-13.997 0-7.722-6.28-14-14-14zm0 25.63a11.6 11.6 0 0 1-5.918-1.62l-.424-.25-4.38 1.148 1.17-4.27-.276-.438a11.59 11.59 0 0 1-1.79-6.2c0-6.407 5.21-11.62 11.618-11.62 6.408 0 11.62 5.213 11.62 11.62 0 6.407-5.212 11.63-11.62 11.63zm6.37-8.71c-.35-.175-2.07-1.02-2.39-1.137-.32-.117-.554-.175-.787.175-.233.35-.904 1.137-1.108 1.37-.204.234-.408.263-.758.088-.35-.175-1.477-.544-2.814-1.736-1.04-.928-1.743-2.074-1.947-2.424-.204-.35-.022-.54.153-.714.158-.157.35-.408.525-.612.175-.204.233-.35.35-.583.116-.233.058-.438-.03-.612-.087-.175-.787-1.896-1.078-2.6-.284-.683-.573-.59-.787-.6h-.67c-.234 0-.613.087-.934.437-.32.35-1.225 1.196-1.225 2.916s1.254 3.383 1.43 3.616c.174.233 2.467 3.766 5.978 5.282.835.36 1.486.575 1.994.736.838.266 1.6.228 2.202.138.672-.1 2.07-.846 2.36-1.662.292-.817.292-1.516.204-1.662-.087-.146-.32-.233-.67-.408z" />
+                </svg>
 
+                WhatsApp Chat
+              </a>
+            </div>
           </div>
-
         </div>
-
       )}
 
+      {/* =================================================
+          REUSABLE CHECKOUT
+
+          New Add More functionality included.
+      ================================================= */}
+
+      <CheckoutModal
+        open={
+          showCheckout
+        }
+        cartItems={
+          cartItems
+        }
+        totalAmount={
+          totalAmount
+        }
+        customer={
+          customer
+        }
+        setCustomer={
+          setCustomer
+        }
+        paymentLoading={
+          paymentLoading
+        }
+        onClose={() => {
+          if (
+            !paymentLoading
+          ) {
+            setShowCheckout(
+              false
+            );
+          }
+        }}
+        onAddMore={
+          handleAddMore
+        }
+        onChangeQuantity={
+          changeQuantity
+        }
+        onPayNow={
+          handlePayNow
+        }
+      />
     </div>
   );
 }
+
+/* =========================================================
+   PRODUCT GRID SKELETON
+
+   Reusable only inside Home.jsx.
+========================================================= */
+
+function ProductGridSkeleton() {
+  return (
+    <div
+      className="
+        grid
+        grid-cols-2
+        gap-3
+        sm:gap-4
+        md:grid-cols-3
+        lg:grid-cols-4
+      "
+    >
+      {Array.from({
+        length: 4,
+      }).map((_, index) => (
+        <div
+          key={index}
+          className="
+            overflow-hidden
+            rounded-2xl
+            bg-white
+          "
+        >
+          {/* IMAGE */}
+
+          <div
+            className="
+              h-[165px]
+              animate-pulse
+              bg-slate-100
+              min-[400px]:h-[180px]
+              sm:h-[220px]
+              md:h-[250px]
+              lg:h-[290px]
+            "
+          />
+
+          {/* CONTENT */}
+
+          <div
+            className="
+              p-3
+              sm:p-4
+            "
+          >
+            <div
+              className="
+                h-3
+                w-16
+                animate-pulse
+                rounded
+                bg-slate-100
+              "
+            />
+
+            <div
+              className="
+                mt-2
+                h-4
+                w-3/4
+                animate-pulse
+                rounded
+                bg-slate-100
+              "
+            />
+
+            <div
+              className="
+                mt-4
+                h-5
+                w-1/2
+                animate-pulse
+                rounded
+                bg-slate-100
+              "
+            />
+
+            <div
+              className="
+                mt-3
+                h-8
+                animate-pulse
+                rounded-lg
+                bg-slate-100
+                sm:h-9
+              "
+            />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+
+
 
 
 
