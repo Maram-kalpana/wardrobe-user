@@ -15,51 +15,53 @@ export default function ProductCard({
   product,
   onView,
 }) {
-  const variants = Array.isArray(product?.variants)
-    ? product.variants
-    : [];
+  
+const variants = Array.isArray(product?.variants)
+  ? product.variants
+  : [];
 
-  /* =======================================================
-     DEFAULT PRICE
+// Select the first size that has stock.
+const defaultVariant =
+  variants.find(
+    (variant) => Number(variant.quantity ?? 0) > 0
+  ) || null;
 
-     First size/variant price only.
-     Do not calculate minimum price.
-  ======================================================= */
+// Out of stock only when no variant is available.
+const isOutOfStock =
+  variants.length === 0 || !defaultVariant;
 
-  const defaultVariant =
-    variants[0] || null;
+// Display the price of the available size.
+const price = Number(defaultVariant?.amount || 0);
 
-  const price = Number(
-    defaultVariant?.amount || 0
-  );
 
   return (
     <article
-      onClick={() => onView(product)}
-      className="
-        group
-        flex
-        h-full
-        min-w-0
-        cursor-pointer
-        flex-col
-        overflow-hidden
-
-        rounded-[12px]
-        border
-        border-slate-200
-        bg-white
-        shadow-[0_2px_8px_rgba(0,0,0,0.05)]
-
-        transition-all
-        duration-300
-
-        sm:rounded-[14px]
-
-        lg:rounded-[16px]
-        lg:hover:-translate-y-1
-        lg:hover:shadow-[0_10px_24px_rgba(0,0,0,0.08)]
-      "
+      // onClick={() => onView(product)}
+       onClick={() => {
+    if (!isOutOfStock) {
+      onView(product);
+    }
+  }}
+      className={`
+  group
+  flex
+  h-full
+  min-w-0
+  ${isOutOfStock ? "cursor-not-allowed" : "cursor-pointer"}
+  flex-col
+  overflow-hidden
+  rounded-[12px]
+  border
+  border-slate-200
+  bg-white
+  shadow-[0_2px_8px_rgba(0,0,0,0.05)]
+  transition-all
+  duration-300
+  sm:rounded-[14px]
+  lg:rounded-[16px]
+  ${!isOutOfStock ? "lg:hover:-translate-y-1 lg:hover:shadow-[0_10px_24px_rgba(0,0,0,0.08)]" : ""}
+`}
+      
     >
       {/* ===================================================
           PRODUCT IMAGE
@@ -76,7 +78,7 @@ export default function ProductCard({
           image height gradually increases.
       =================================================== */}
 
-      <div
+      {/* <div
         className="
           relative
           h-[165px]
@@ -134,7 +136,57 @@ export default function ProductCard({
             No Image
           </div>
         )}
-      </div>
+      </div> */}
+      
+
+
+<div
+  className="
+    relative
+    w-full
+    aspect-[3/4]
+    overflow-hidden
+    bg-[#f7f7f7]
+  "
+>
+  {product?.image_url ? (
+    <img
+      src={product.image_url}
+      alt={product?.name || "Product"}
+      loading="lazy"
+      className="
+        block
+        h-full
+        w-full
+        object-cover
+        object-center
+      "
+    />
+  ) : (
+    <div
+      className="
+        flex
+        h-full
+        w-full
+        items-center
+        justify-center
+        text-xs
+        text-slate-400
+      "
+    >
+      No Image
+    </div>
+  )}
+  {isOutOfStock && (
+  <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/50">
+    <span className="rounded-lg bg-white px-4 py-2 text-sm font-extrabold text-[#a33b72] shadow">
+      Out of Stock
+    </span>
+  </div>
+)}
+</div>
+
+
 
       {/* ===================================================
           CARD CONTENT
@@ -249,11 +301,19 @@ export default function ProductCard({
 
         <button
           type="button"
-          onClick={(event) => {
-            event.stopPropagation();
+          // onClick={(event) => {
+          //   event.stopPropagation();
 
-            onView(product);
-          }}
+          //   onView(product);
+          // }}
+          onClick={(event) => {
+  event.stopPropagation();
+
+  if (!isOutOfStock) {
+    onView(product);
+  }
+}}
+disabled={isOutOfStock}
           className="
             mt-2.5
 
@@ -277,7 +337,7 @@ export default function ProductCard({
             transition-colors
             duration-200
 
-            hover:bg-[#c90069]
+            hover:bg-[#bd2975]
 
             sm:mt-3
             sm:h-[36px]
@@ -287,6 +347,9 @@ export default function ProductCard({
             lg:h-[40px]
             lg:rounded-[10px]
             lg:text-sm
+              disabled:cursor-not-allowed
+  disabled:opacity-50
+  disabled:hover:bg-[#ee027e]
           "
         >
           View More
@@ -309,179 +372,3 @@ export default function ProductCard({
   );
 }
 
-
-// import { ChevronRight } from "lucide-react";
-
-// const formatINR = (value) =>
-//   Number(value || 0).toLocaleString("en-IN");
-
-// export default function ProductCard({
-//   product,
-//   onView,
-// }) {
-//   const variants = Array.isArray(product.variants)
-//     ? product.variants
-//     : [];
-
-//   /*
-//     IMPORTANT:
-//     You asked for DEFAULT FIRST SIZE PRICE.
-
-//     So do NOT calculate minimum price here.
-//     We take variants[0].
-//   */
-//   const defaultVariant = variants[0] || null;
-
-//   const price = Number(
-//     defaultVariant?.amount || 0
-//   );
-
-//   return (
-//     <article
-//       onClick={() => onView(product)}
-//       className="
-//         group
-//         flex
-//         cursor-pointer
-//         flex-col
-//         overflow-hidden
-//         rounded-[18px]
-//         border
-//         border-[#ee027e]/10
-//         bg-white
-//         shadow-sm
-//         transition-all
-//         duration-300
-//         hover:-translate-y-1
-//         hover:shadow-[0_12px_30px_rgba(238,2,126,0.10)]
-//       "
-//     >
-//       {/* ===============================
-//           PRODUCT IMAGE
-//       =============================== */}
-
-//       <div
-//         className="
-//           relative
-//           aspect-[3/4]
-//           w-full
-//           overflow-hidden
-//           bg-[#f6efef]
-//         "
-//       >
-//         {product.image_url ? (
-//           <img
-//             src={product.image_url}
-//             alt={product.name}
-//             loading="lazy"
-//             className="
-//               h-full
-//               w-full
-//               object-cover
-//               transition-transform
-//               duration-500
-//               group-hover:scale-[1.03]
-//             "
-//           />
-//         ) : (
-//           <div
-//             className="
-//               flex
-//               h-full
-//               items-center
-//               justify-center
-//               text-sm
-//               font-medium
-//               text-slate-400
-//             "
-//           >
-//             No Image
-//           </div>
-//         )}
-//       </div>
-
-//       {/* ===============================
-//           PRODUCT CONTENT
-//       =============================== */}
-
-//       <div className="flex flex-1 flex-col p-3 sm:p-4">
-//         {/* CATEGORY NAME */}
-
-//         <p
-//           className="
-//             text-[10px]
-//             font-extrabold
-//             uppercase
-//             tracking-[0.12em]
-//             text-[#ee027e]
-//           "
-//         >
-//           {product.category_name || "Collection"}
-//         </p>
-
-//         {/* PRODUCT NAME */}
-
-//         <h3
-//           className="
-//             mt-1
-//             line-clamp-2
-//             min-h-[40px]
-//             text-sm
-//             font-bold
-//             leading-5
-//             text-slate-900
-//             sm:text-[15px]
-//           "
-//         >
-//           {product.name}
-//         </h3>
-
-//         {/* DEFAULT FIRST SIZE PRICE */}
-
-//         <div className="mt-2">
-//           <span
-//             className="
-//               text-lg
-//               font-black
-//               text-slate-900
-//             "
-//           >
-//             ₹{formatINR(price)}
-//           </span>
-//         </div>
-
-//         {/* VIEW MORE */}
-
-//         <button
-//           type="button"
-//           onClick={(event) => {
-//             event.stopPropagation();
-//             onView(product);
-//           }}
-//           className="
-//             mt-4
-//             flex
-//             h-10
-//             w-full
-//             items-center
-//             justify-center
-//             gap-2
-//             rounded-xl
-//             bg-[#ee027e]
-//             px-4
-//             text-sm
-//             font-bold
-//             text-white
-//             transition-all
-//             duration-300
-//             hover:bg-[#c90069]
-//           "
-//         >
-//           View More
-
-//           <ChevronRight size={16} />
-//         </button>
-//       </div>
-//     </article>
-//   );
-// }

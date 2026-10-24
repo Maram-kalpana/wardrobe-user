@@ -59,13 +59,16 @@ export default function ProductDetails({
 
      First backend size selected by default.
   ======================================================= */
+const firstAvailableVariant =
+  variants.find(
+    (variant) => Number(variant.quantity ?? 0) > 0
+  ) || variants[0] || null;
 
-  const [
-    selectedVariantId,
-    setSelectedVariantId,
-  ] = useState(
-    variants[0]?.id || null
-  );
+
+const [selectedVariantId, setSelectedVariantId] = useState(
+  firstAvailableVariant?.id || null
+);
+  
 
   /* =======================================================
      PRODUCT DESCRIPTION
@@ -79,38 +82,41 @@ export default function ProductDetails({
     setDescriptionOpen,
   ] = useState(true);
 
+
+  
   /* =======================================================
      WHEN PRODUCT CHANGES
   ======================================================= */
 
   useEffect(() => {
-    setActiveImage(0);
+  setActiveImage(0);
 
-    setSelectedVariantId(
-      product?.variants?.[0]?.id ||
-        null
-    );
+  const availableVariant =
+    product?.variants?.find(
+      (variant) => Number(variant.quantity ?? 0) > 0
+    ) ||
+    product?.variants?.[0] ||
+    null;
 
-    setDescriptionOpen(true);
+  setSelectedVariantId(availableVariant?.id ?? null);
 
-    window.scrollTo({
-      top: 0,
-      behavior: "smooth",
-    });
-  }, [product?.id]);
+  setDescriptionOpen(true);
+
+  window.scrollTo({
+    top: 0,
+    behavior: "smooth",
+  });
+}, [product?.id, product?.variants]);
 
   /* =======================================================
      SELECTED VARIANT
   ======================================================= */
 
   const selectedVariant =
-    variants.find(
-      (variant) =>
-        variant.id ===
-        selectedVariantId
-    ) ||
-    variants[0] ||
-    null;
+  variants.find(
+    (variant) => variant.id === selectedVariantId
+  ) ||
+  firstAvailableVariant;
 
   /* =======================================================
      CURRENT PRICE
@@ -164,20 +170,33 @@ export default function ProductDetails({
      No backend/cart flow change.
   ======================================================= */
 
+  // const handleAddToCart = () => {
+  //   if (!selectedVariant) {
+  //     alert(
+  //       "Please select a size."
+  //     );
+
+  //     return;
+  //   }
+
+  //   onAdd(
+  //     product,
+  //     selectedVariant
+  //   );
+  // };
   const handleAddToCart = () => {
-    if (!selectedVariant) {
-      alert(
-        "Please select a size."
-      );
+  if (!selectedVariant) {
+    alert("Please select a size.");
+    return;
+  }
 
-      return;
-    }
+  if (Number(selectedVariant.quantity ?? 0) <= 0) {
+    alert("This size is out of stock.");
+    return;
+  }
 
-    onAdd(
-      product,
-      selectedVariant
-    );
-  };
+  onAdd(product, selectedVariant);
+};
 
   /* =======================================================
      UI
@@ -300,27 +319,30 @@ export default function ProductDetails({
                 visible in your first screenshot.
             =============================================== */}
 
-            <div
-              className="
-                relative
-
-                h-[300px]
-                w-full
-
-                overflow-hidden
-
-                rounded-[10px]
-
-                bg-[#f7f7f7]
-
-                sm:h-[380px]
-                sm:rounded-xl
-
-                md:h-[430px]
-
-                lg:h-[520px]
-              "
-            >
+            {/* <div
+  className="
+    relative
+    w-full
+    h-[420px]
+    sm:h-[520px]
+    md:h-[620px]
+    lg:h-[520px]
+    overflow-hidden
+    rounded-[10px]
+    sm:rounded-xl
+    bg-[#f7f7f7]
+  "
+> */}
+<div
+  className="
+    relative
+    w-full
+    overflow-hidden
+    rounded-[10px]
+    sm:rounded-xl
+    bg-[#f7f7f7]
+  "
+>
               {images[
                 activeImage
               ]?.url ? (
@@ -335,11 +357,10 @@ export default function ProductDetails({
                     "Product"
                   }
                   className="
-                    h-full
-                    w-full
-
-                    object-cover
-                    object-center
+                     block
+  w-full
+  h-auto
+  object-contain
                   "
                 />
               ) : product?.image_url ? (
@@ -556,6 +577,7 @@ export default function ProductDetails({
                     const active =
                       activeImage ===
                       index;
+                    // const outOfStock = Number(variant.quantity ?? 0) <= 0;
 
                     return (
                       <button
@@ -564,11 +586,12 @@ export default function ProductDetails({
                           index
                         }
                         type="button"
-                        onClick={() =>
-                          setActiveImage(
-                            index
-                          )
-                        }
+                        // onClick={() =>
+                        //   setActiveImage(
+                        //     index
+                        //   )
+                        // }
+                        onClick={() => setActiveImage(index)}
                         className={`
                           h-[58px]
                           w-[50px]
@@ -794,54 +817,43 @@ export default function ProductDetails({
                     lg:gap-3
                   "
                 >
-                  {variants.map(
-                    (variant) => {
-                      const active =
-                        variant.id ===
-                        selectedVariantId;
+                 {variants.map((variant) => {
+  const active =
+    variant.id === selectedVariantId;
 
-                      return (
-                        <button
-                          key={
-                            variant.id
-                          }
-                          type="button"
-                          onClick={() =>
-                            setSelectedVariantId(
-                              variant.id
-                            )
-                          }
-                          className={`
-                            min-w-[46px]
+  const outOfStock =
+    Number(variant.quantity ?? 0) <= 0;
 
-                            rounded-[7px]
+  return (
+    <button
+      key={variant.id}
+      type="button"
+      disabled={outOfStock}
+      onClick={() => {
+        if (!outOfStock) {
+          setSelectedVariantId(variant.id);
+        }
+      }}
+                         
+className={`
+  min-w-[42px]
+  h-9
+  rounded-md
+  border
+  px-3
+  text-sm
+  font-semibold
+  transition-all
 
-                            border
+  ${
+    outOfStock
+      ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400 line-through opacity-70"
+      : active
+        ? "border-[#ee027e] bg-[#ee027e] text-white shadow-sm"
+        : "border-slate-300 bg-white text-slate-700 hover:border-[#ee027e] hover:text-[#ee027e]"
+  }
+`}
 
-                            px-3
-                            py-2
-
-                            text-[11px]
-                            font-bold
-
-                            transition
-
-                            sm:min-w-[52px]
-                            sm:px-3.5
-                            sm:py-2.5
-                            sm:text-xs
-
-                            lg:min-w-[58px]
-                            lg:rounded-lg
-                            lg:px-4
-                            lg:text-sm
-
-                            ${
-                              active
-                                ? "border-[#ee027e] bg-[#ee027e] text-white"
-                                : "border-slate-300 bg-white text-slate-700 hover:border-[#ee027e]"
-                            }
-                          `}
                         >
                           {
                             variant.size
@@ -935,8 +947,9 @@ export default function ProductDetails({
             <button
               type="button"
               disabled={
-                !selectedVariant
-              }
+  !selectedVariant ||
+  Number(selectedVariant.quantity ?? 0) <= 0
+}
               onClick={
                 handleAddToCart
               }
@@ -1150,6 +1163,46 @@ export default function ProductDetails({
                 </div>
               )}
             </div>
+            
+{/* RETURN AND EXCHANGE POLICY */}
+<div
+  className="
+    mt-3
+    rounded-[10px]
+    border
+    border-slate-200
+    bg-white
+    p-3
+    sm:mt-4
+    sm:p-4
+    lg:rounded-xl
+  "
+>
+  <div className="flex items-start gap-3">
+    <div
+      className="
+        flex h-9 w-9 shrink-0 items-center justify-center
+        rounded-full bg-[#fff0f7]
+        text-[#ee027e]
+        sm:h-10 sm:w-10
+      "
+    >
+      <ShoppingBag className="h-5 w-5" />
+    </div>
+
+    <div>
+      <h3 className="text-sm font-bold text-slate-900 sm:text-base">
+        No Return & No Exchange
+      </h3>
+
+      <p className="mt-1 text-xs leading-6 text-slate-600 sm:text-sm">
+        Please choose your size carefully before placing your order.
+        Products are not eligible for return or exchange.
+      </p>
+    </div>
+  </div>
+</div>
+
           </div>
         </div>
       </section>

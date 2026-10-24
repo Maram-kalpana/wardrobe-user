@@ -38,6 +38,10 @@ import { loadRazorpay } from "../utils/loadRazorpay";
 import ProductCard from "../components/ProductCard";
 import ProductDetails from "../components/ProductDetails";
 import Header from "../components/Header";
+import {
+  getStoreInformationApi,
+  getStoreLogoUrl,
+} from "../api/storeApi";
 import CheckoutModal from "../components/CheckoutModal";
 
 /* =========================================================
@@ -91,13 +95,14 @@ const normalizeProduct = (product) => {
     : [];
 
   const variants = Array.isArray(product?.sizes)
-    ? product.sizes.map((size) => ({
-        id: size.id,
-        size: size.size,
-        amount: Number(size.price || 0),
-        mrp: 0,
-      }))
-    : [];
+  ? product.sizes.map((size) => ({
+      id: size.id,
+      size: size.size,
+      amount: Number(size.price || 0),
+      quantity: Number(size.quantity ?? 0),
+      mrp: 0,
+    }))
+  : [];
 
   return {
     ...product,
@@ -134,9 +139,49 @@ const normalizeCategory = (category) => ({
 ========================================================= */
 
 export default function Home() {
-  /* =======================================================
-     CATALOG
-  ======================================================= */
+ 
+  
+  const [storeInfo, setStoreInfo] = useState(null);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadStoreInformation = async () => {
+      try {
+        const response = await getStoreInformationApi();
+
+        if (active && response?.success) {
+          setStoreInfo(response.data);
+        }
+      } catch (error) {
+        console.error("STORE INFORMATION ERROR:", error);
+      }
+    };
+
+    loadStoreInformation();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const storeLogo =
+    getStoreLogoUrl(storeInfo?.store_logo) || "/vaibhavi.png";
+
+  const storeAddress = storeInfo?.store_address || "";
+
+  const storePhone = storeInfo?.mobile_number || "";
+
+  const storeWhatsApp = storeInfo?.whatsapp_number || "";
+
+  const callNumber = storePhone.replace(/[^\d+]/g, "");
+
+  const whatsappNumber = storeWhatsApp.replace(/\D/g, "");
+
+  const whatsappMessage = encodeURIComponent(
+    "Hello The Wardrobe, I would like to know more about your products."
+  );
+
 
   const [
     categories,
@@ -461,50 +506,37 @@ export default function Home() {
      all remain in cart.
   ======================================================= */
 
-  const addToCart =
-    useCallback(
-      (product, variant) => {
-        if (
-          !product ||
-          !variant
-        ) {
-          return;
-        }
+ 
+const addToCart = useCallback((product, variant) => {
+  if (!product || !variant) return;
 
-        /*
-          Cart changed.
+  const availableQuantity = Number(variant.quantity ?? 0);
 
-          Previous backend cart
-          should be recreated
-          before checkout.
-        */
+  if (availableQuantity <= 0) {
+    alert("This size is out of stock.");
+    return;
+  }
 
-        setCartId(null);
+  setCart((previous) => {
+    const existing = previous[variant.id];
+    const existingQuantity = Number(existing?.quantity || 0);
 
-        setCart((previous) => {
-          const existing =
-            previous[
-              variant.id
-            ];
+    if (existingQuantity >= availableQuantity) {
+      return previous;
+    }
 
-          return {
-            ...previous,
-
-            [variant.id]: {
-              product,
-              variant,
-
-              quantity:
-                (
-                  existing?.quantity ||
-                  0
-                ) + 1,
-            },
-          };
-        });
+    return {
+      ...previous,
+      [variant.id]: {
+        product,
+        variant,
+        quantity: existingQuantity + 1,
       },
-      []
-    );
+    };
+  });
+
+  setCartId(null);
+}, []);
 
   /* =======================================================
      CHANGE QUANTITY
@@ -528,6 +560,15 @@ export default function Home() {
           const nextQuantity =
             entry.quantity +
             delta;
+
+            const availableQuantity = Number(
+  entry.variant?.quantity ?? 0
+);
+
+if (nextQuantity > availableQuantity) {
+  alert(`Only ${availableQuantity} item(s) available for this size.`);
+  return previous;
+}
 
           if (
             nextQuantity <= 0
@@ -631,6 +672,14 @@ export default function Home() {
         0
       );
     }, [cartItems]);
+
+    const deliveryCharge =
+  totalAmount === 0 || totalAmount >= 1000
+    ? 0
+    : 100;
+
+const grandTotal =
+  totalAmount + deliveryCharge;
 
   /* =======================================================
      CHECKOUT
@@ -1381,17 +1430,22 @@ export default function Home() {
       ================================================= */}
 
       <Header
-        totalQuantity={
-          totalQuantity
-        }
-        onHome={
-          backToHome
-        }
-        onContact={() =>
-          setShowContactPopup(
-            true
-          )
-        }
+       totalQuantity={totalQuantity}
+  onHome={backToHome}
+  onContact={() => setShowContactPopup(true)}
+  storeLogo={storeLogo}
+  storeName={storeInfo?.store_name || "The Wardrobe"}
+        // totalQuantity={
+        //   totalQuantity
+        // }
+        // onHome={
+        //   backToHome
+        // }
+        // onContact={() =>
+        //   setShowContactPopup(
+        //     true
+        //   )
+        // }
       />
 
       {/* =================================================
@@ -1530,20 +1584,20 @@ export default function Home() {
                             }
                           `}
                         >
-                          {category.image_url ? (
+                          {category.image_url ? (         
                             <img
-                              src={
-                                category.image_url
-                              }
-                              alt={
-                                category.name
-                              }
+                              src={category.image_url}
+                              alt={category.name}
+                              loading="lazy"
                               className="
+                                block
                                 h-full
                                 w-full
-                                object-cover
+                                object-contain
+                                object-center
                               "
                             />
+
                           ) : (
                             <span
                               className="
@@ -2081,8 +2135,10 @@ export default function Home() {
               "
             >
               <img
-                src="/vaibhavi.png"
-                alt="The Wardrobe"
+                // src="/vaibhavi.png"
+                // alt="The Wardrobe"
+                src={storeLogo}
+  alt={storeInfo?.store_name || "The Wardrobe"}
                 className="
                   h-[75px]
                   w-auto
@@ -2134,7 +2190,8 @@ export default function Home() {
                   sm:leading-6
                 "
               >
-                The wardrobe,Plot no 324 ,road 10, sai township, manneguda,501510, rangareddy, hyderabad
+                {storeAddress || "Address not available"}
+                {/* The wardrobe,Plot no 324 ,road 10, sai township, manneguda,501510, rangareddy, hyderabad */}
               </p>
             </div>
 
@@ -2153,7 +2210,8 @@ export default function Home() {
               {/* CALL */}
 
               <a
-                href="tel:+919640364184"
+                // href="tel:+919640364184"
+                href={callNumber ? `tel:${callNumber}` : undefined}
                 className="
                   flex
                   h-11
@@ -2188,7 +2246,12 @@ export default function Home() {
               {/* WHATSAPP */}
 
               <a
-                href="https://wa.me/919640364184?text=Hello%20The%20Wardrobe%2C%20I%20would%20like%20to%20know%20more%20about%20your%20products."
+              href={
+  whatsappNumber
+    ? `https://wa.me/${whatsappNumber}?text=${whatsappMessage}`
+    : undefined
+}
+                // href="https://wa.me/919640364184?text=Hello%20The%20Wardrobe%2C%20I%20would%20like%20to%20know%20more%20about%20your%20products."
                 target="_blank"
                 rel="noopener noreferrer"
                 className="
@@ -2274,6 +2337,8 @@ export default function Home() {
         onPayNow={
           handlePayNow
         }
+        deliveryCharge={deliveryCharge}
+grandTotal={grandTotal}
       />
     </div>
   );
