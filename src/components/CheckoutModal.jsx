@@ -1,10 +1,6 @@
-import {
-  CreditCard,
-  Minus,
-  Plus,
-  ShoppingBag,
-  X,
-} from "lucide-react";
+import { CreditCard, Minus, Plus, ShoppingBag, X } from "lucide-react";
+import { useEffect, useState } from "react";
+import { validateCouponApi } from "../api/couponApi";
 
 const FREE_DELIVERY_MINIMUM = 1000;
 const DELIVERY_CHARGE = 100;
@@ -15,19 +11,6 @@ const formatINR = (amount) =>
     maximumFractionDigits: 2,
   });
 
-
-// export default function CheckoutModal({
-//   open,
-//   cartItems,
-//   totalAmount,
-//   customer,
-//   setCustomer,
-//   paymentLoading,
-//   onClose,
-//   onAddMore,
-//   onChangeQuantity,
-//   onPayNow,
-// }) {
 export default function CheckoutModal({
   open,
   cartItems = [],
@@ -44,27 +27,106 @@ export default function CheckoutModal({
   onChangeQuantity,
   onPayNow,
 }) {
+  /* =========================================
+     COUPON STATE
+  ========================================= */
+
+  const [couponCode, setCouponCode] = useState("");
+  const [appliedCoupon, setAppliedCoupon] = useState(null);
+  const [couponError, setCouponError] = useState("");
+  const [couponLoading, setCouponLoading] = useState(false);
+
+  /* =========================================
+     PRICE CALCULATION
+  ========================================= */
 
   const subtotal = Number(
-  cartItems
-    .reduce(
-      (sum, item) =>
-        sum +
-        Number(
-          item.total ??
-            Number(item.price || 0) * Number(item.quantity || 0)
-        ),
-      0
-    )
-    .toFixed(2)
-);
+    cartItems
+      .reduce(
+        (sum, item) =>
+          sum +
+          Number(
+            item.total ??
+              Number(item.price || 0) * Number(item.quantity || 0)
+          ),
+        0
+      )
+      .toFixed(2)
+  );
 
-const deliveryCharge =
-  cartItems.length === 0 || subtotal >= FREE_DELIVERY_MINIMUM
-    ? 0
-    : DELIVERY_CHARGE;
+  const deliveryCharge =
+    cartItems.length === 0 || subtotal >= FREE_DELIVERY_MINIMUM
+      ? 0
+      : DELIVERY_CHARGE;
 
-const finalAmount = Number((subtotal + deliveryCharge).toFixed(2));
+  const discount = appliedCoupon?.discount || 0;
+
+  const finalAmount = Number(
+    Math.max(subtotal + deliveryCharge - discount, 0).toFixed(2)
+  );
+
+  /* =========================================
+     RE-CHECK COUPON WHEN SUBTOTAL CHANGES
+     (quantity +/- or items added)
+
+     Must stay above the `if (!open)` return.
+  ========================================= */
+
+  useEffect(() => {
+    if (!appliedCoupon) return;
+
+    let active = true;
+
+    validateCouponApi(appliedCoupon.code, subtotal)
+      .then((res) => {
+        if (active) setAppliedCoupon(res.data);
+      })
+      .catch((err) => {
+        if (!active) return;
+        setAppliedCoupon(null);
+        setCouponError(
+          err?.response?.data?.message || "Coupon no longer valid"
+        );
+      });
+
+    return () => {
+      active = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subtotal]);
+
+  /* =========================================
+     COUPON ACTIONS
+  ========================================= */
+
+  const applyCoupon = async () => {
+    const code = couponCode.trim();
+
+    if (!code) {
+      setCouponError("Enter a coupon code");
+      return;
+    }
+
+    try {
+      setCouponLoading(true);
+      setCouponError("");
+
+      const res = await validateCouponApi(code, subtotal);
+
+      setAppliedCoupon(res.data);
+    } catch (err) {
+      setAppliedCoupon(null);
+      setCouponError(err?.response?.data?.message || "Invalid coupon");
+    } finally {
+      setCouponLoading(false);
+    }
+  };
+
+  const removeCoupon = () => {
+    setAppliedCoupon(null);
+    setCouponCode("");
+    setCouponError("");
+  };
 
   if (!open) {
     return null;
@@ -72,18 +134,7 @@ const finalAmount = Number((subtotal + deliveryCharge).toFixed(2));
 
   return (
     <div
-      className="
-        fixed
-        inset-0
-        z-50
-        flex
-        items-end
-        justify-center
-        bg-black/50
-        backdrop-blur-[2px]
-        sm:items-center
-        sm:p-4
-      "
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 backdrop-blur-[2px] sm:items-center sm:p-4"
       onClick={() => {
         if (!paymentLoading) {
           onClose();
@@ -95,83 +146,27 @@ const finalAmount = Number((subtotal + deliveryCharge).toFixed(2));
       =================================================== */}
 
       <div
-        className="
-          flex
-          max-h-[92vh]
-          w-full
-          flex-col
-          rounded-t-[26px]
-          bg-white
-          shadow-2xl
-          sm:max-w-md
-          sm:rounded-[24px]
-        "
-        onClick={(event) =>
-          event.stopPropagation()
-        }
+        className="flex max-h-[92vh] w-full flex-col rounded-t-[26px] bg-white shadow-2xl sm:max-w-md sm:rounded-[24px]"
+        onClick={(event) => event.stopPropagation()}
       >
         {/* MOBILE HANDLE */}
 
-        <div
-          className="
-            mx-auto
-            mt-4
-            h-1.5
-            w-11
-            shrink-0
-            rounded-full
-            bg-[#e4d3cc]
-            sm:hidden
-          "
-        />
+        <div className="mx-auto mt-4 h-1.5 w-11 shrink-0 rounded-full bg-[#e4d3cc] sm:hidden" />
 
         {/* =================================================
             CONTENT SCROLL AREA
         ================================================= */}
 
-        <div
-          className="
-            min-h-0
-            flex-1
-            overflow-y-auto
-            p-5
-            pb-3
-            sm:p-6
-            sm:pb-3
-          "
-        >
+        <div className="min-h-0 flex-1 overflow-y-auto p-5 pb-3 sm:p-6 sm:pb-3">
           {/* HEADER */}
 
-          <div
-            className="
-              flex
-              items-start
-              justify-between
-              gap-4
-            "
-          >
+          <div className="flex items-start justify-between gap-4">
             <div>
-              <p
-                className="
-                  text-[10px]
-                  font-bold
-                  uppercase
-                  tracking-[0.2em]
-                  text-[#ee027e]
-                "
-              >
+              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#ee027e]">
                 Checkout
               </p>
 
-              <h2
-                className="
-                  mt-1
-                  text-xl
-                  font-black
-                  text-slate-900
-                  sm:text-2xl
-                "
-              >
+              <h2 className="mt-1 text-xl font-black text-slate-900 sm:text-2xl">
                 Complete Your Order
               </h2>
             </div>
@@ -180,20 +175,7 @@ const finalAmount = Number((subtotal + deliveryCharge).toFixed(2));
               type="button"
               disabled={paymentLoading}
               onClick={onClose}
-              className="
-                flex
-                h-9
-                w-9
-                shrink-0
-                items-center
-                justify-center
-                rounded-full
-                bg-[#ee027e]/10
-                text-[#ee027e]
-                transition
-                hover:bg-[#ee027e]/15
-                disabled:opacity-50
-              "
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#ee027e]/10 text-[#ee027e] transition hover:bg-[#ee027e]/15 disabled:opacity-50"
               aria-label="Close checkout"
             >
               <X size={18} />
@@ -204,204 +186,68 @@ const finalAmount = Number((subtotal + deliveryCharge).toFixed(2));
               ORDER SUMMARY
           ================================================= */}
 
-          <div
-            className="
-              mt-5
-              rounded-2xl
-              border
-              border-[#ee027e]/10
-              bg-[#fff8f8]
-              p-4
-            "
-          >
-            <div
-              className="
-                mb-3
-                flex
-                items-center
-                justify-between
-                gap-3
-              "
-            >
-              <p
-                className="
-                  text-sm
-                  font-bold
-                  text-slate-900
-                "
-              >
-                Order Summary
-              </p>
+          <div className="mt-5 rounded-2xl border border-[#ee027e]/10 bg-[#fff8f8] p-4">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <p className="text-sm font-bold text-slate-900">Order Summary</p>
 
-              <span
-                className="
-                  rounded-full
-                  bg-white
-                  px-2.5
-                  py-1
-                  text-[10px]
-                  font-bold
-                  text-[#ee027e]
-                "
-              >
+              <span className="rounded-full bg-white px-2.5 py-1 text-[10px] font-bold text-[#ee027e]">
                 {cartItems.length}{" "}
-                {cartItems.length === 1
-                  ? "Product"
-                  : "Products"}
+                {cartItems.length === 1 ? "Product" : "Products"}
               </span>
             </div>
 
-            {/* ===============================================
-                PRODUCTS SCROLL HERE
+            {/* PRODUCTS (scrolls when many items) */}
 
-                More products can be added without making
-                the complete checkout popup excessively tall.
-            =============================================== */}
-
-            <div
-              className="
-                max-h-[210px]
-                space-y-3
-                overflow-y-auto
-                overscroll-contain
-                pr-1
-                sm:max-h-[240px]
-              "
-            >
+            <div className="max-h-[210px] space-y-3 overflow-y-auto overscroll-contain pr-1 sm:max-h-[240px]">
               {cartItems.map((item) => (
                 <div
                   key={item.variantId}
-                  className="
-                    flex
-                    items-center
-                    gap-3
-                    rounded-xl
-                    bg-white/60
-                    p-2
-                  "
+                  className="flex items-center gap-3 rounded-xl bg-white/60 p-2"
                 >
                   {/* IMAGE */}
 
-                  <div
-                    className="
-                      h-14
-                      w-11
-                      shrink-0
-                      overflow-hidden
-                      rounded-lg
-                      bg-[#f6efef]
-                    "
-                  >
+                  <div className="h-14 w-11 shrink-0 overflow-hidden rounded-lg bg-[#f6efef]">
                     {item.image_url ? (
                       <img
                         src={item.image_url}
                         alt={item.name}
-                        className="
-                          h-full
-                          w-full
-                          object-cover
-                        "
+                        className="h-full w-full object-cover"
                       />
                     ) : null}
                   </div>
 
                   {/* DETAILS */}
 
-                  <div
-                    className="
-                      min-w-0
-                      flex-1
-                    "
-                  >
-                    <p
-                      className="
-                        truncate
-                        text-sm
-                        font-semibold
-                        text-slate-800
-                      "
-                    >
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-slate-800">
                       {item.name}
                     </p>
 
-                    <p
-                      className="
-                        mt-0.5
-                        text-xs
-                        text-slate-500
-                      "
-                    >
-                      Size {item.size} · ₹
-                      {formatINR(item.price)}
+                    <p className="mt-0.5 text-xs text-slate-500">
+                      Size {item.size} · ₹{formatINR(item.price)}
                     </p>
 
                     {/* QUANTITY */}
 
-                    <div
-                      className="
-                        mt-1.5
-                        flex
-                        items-center
-                        gap-2
-                      "
-                    >
+                    <div className="mt-1.5 flex items-center gap-2">
                       <button
                         type="button"
                         disabled={paymentLoading}
-                        onClick={() =>
-                          onChangeQuantity(
-                            item.variantId,
-                            -1
-                          )
-                        }
-                        className="
-                          flex
-                          h-6
-                          w-6
-                          items-center
-                          justify-center
-                          rounded-md
-                          border
-                          border-[#ee027e]/20
-                          text-[#ee027e]
-                          disabled:opacity-40
-                        "
+                        onClick={() => onChangeQuantity(item.variantId, -1)}
+                        className="flex h-6 w-6 items-center justify-center rounded-md border border-[#ee027e]/20 text-[#ee027e] disabled:opacity-40"
                       >
                         <Minus size={12} />
                       </button>
 
-                      <span
-                        className="
-                          w-5
-                          text-center
-                          text-xs
-                          font-bold
-                          text-slate-900
-                        "
-                      >
+                      <span className="w-5 text-center text-xs font-bold text-slate-900">
                         {item.quantity}
                       </span>
 
                       <button
                         type="button"
                         disabled={paymentLoading}
-                        onClick={() =>
-                          onChangeQuantity(
-                            item.variantId,
-                            1
-                          )
-                        }
-                        className="
-                          flex
-                          h-6
-                          w-6
-                          items-center
-                          justify-center
-                          rounded-md
-                          bg-[#ee027e]
-                          text-white
-                          disabled:opacity-40
-                        "
+                        onClick={() => onChangeQuantity(item.variantId, 1)}
+                        className="flex h-6 w-6 items-center justify-center rounded-md bg-[#ee027e] text-white disabled:opacity-40"
                       >
                         <Plus size={12} />
                       </button>
@@ -410,216 +256,189 @@ const finalAmount = Number((subtotal + deliveryCharge).toFixed(2));
 
                   {/* ITEM TOTAL */}
 
-                  <p
-                    className="
-                      shrink-0
-                      text-sm
-                      font-bold
-                      text-slate-900
-                    "
-                  >
+                  <p className="shrink-0 text-sm font-bold text-slate-900">
                     ₹{formatINR(item.total)}
                   </p>
                 </div>
               ))}
             </div>
 
-            {/* TOTAL */}
+            {/* PRICE BREAKDOWN */}
 
-            
-{/* PRICE BREAKDOWN */}
+            <div className="mt-4 space-y-3 border-t border-[#ee027e]/15 pt-3">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-slate-600">Subtotal</span>
+                <span className="font-semibold text-slate-900">
+                  ₹{formatINR(subtotal)}
+                </span>
+              </div>
 
-<div className="mt-4 space-y-3 border-t border-[#ee027e]/15 pt-3">
-  <div className="flex items-center justify-between text-sm">
-    <span className="text-slate-600">Subtotal</span>
-    <span className="font-semibold text-slate-900">
-      ₹{formatINR(subtotal)}
-    </span>
-  </div>
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-slate-600">Delivery Charges</span>
+                <span
+                  className={
+                    deliveryCharge === 0
+                      ? "font-semibold text-green-600"
+                      : "font-semibold text-slate-900"
+                  }
+                >
+                  {deliveryCharge === 0
+                    ? "FREE"
+                    : `₹${formatINR(deliveryCharge)}`}
+                </span>
+              </div>
 
-  <div className="flex items-center justify-between text-sm">
-    <span className="text-slate-600">Delivery Charges</span>
-    <span className={deliveryCharge === 0 ? "font-semibold text-green-600" : "font-semibold text-slate-900"}>
-      {deliveryCharge === 0 ? "FREE" : `₹${formatINR(deliveryCharge)}`}
-    </span>
-  </div>
+              {cartItems.length > 0 && subtotal < FREE_DELIVERY_MINIMUM && (
+                <p className="text-xs text-slate-500">
+                  Add ₹{formatINR(FREE_DELIVERY_MINIMUM - subtotal)} more to
+                  get free delivery.
+                </p>
+              )}
 
-  {cartItems.length > 0 && subtotal < FREE_DELIVERY_MINIMUM && (
-    <p className="text-xs text-slate-500">
-      Add ₹{formatINR(FREE_DELIVERY_MINIMUM - subtotal)} more to get free delivery.
-    </p>
-  )}
+              {/* COUPON */}
 
-  <div className="flex items-center justify-between border-t border-[#ee027e]/15 pt-3">
-    <span className="font-bold text-slate-900">Total Payable</span>
-    <span className="text-xl font-black text-[#ee027e]">
-      ₹{formatINR(finalAmount)}
-    </span>
-  </div>
-</div>
+              <div>
+                {appliedCoupon ? (
+                  <div className="flex items-center justify-between rounded-lg bg-green-50 px-3 py-2 text-sm">
+                    <span className="font-semibold text-green-700">
+                      {appliedCoupon.code} applied
+                    </span>
 
+                    <button
+                      type="button"
+                      disabled={paymentLoading}
+                      onClick={removeCoupon}
+                      className="text-xs font-semibold text-red-500 disabled:opacity-50"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex gap-2">
+                    <input
+                      value={couponCode}
+                      disabled={paymentLoading}
+                      onChange={(event) =>
+                        setCouponCode(event.target.value.toUpperCase())
+                      }
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          applyCoupon();
+                        }
+                      }}
+                      placeholder="Have a coupon code?"
+                      className="h-10 w-full rounded-lg border border-[#ee027e]/20 bg-white px-3 text-sm uppercase outline-none focus:border-[#ee027e] disabled:bg-slate-50"
+                    />
+
+                    <button
+                      type="button"
+                      disabled={couponLoading || paymentLoading}
+                      onClick={applyCoupon}
+                      className="h-10 shrink-0 rounded-lg bg-[#ee027e] px-4 text-sm font-semibold text-white disabled:opacity-60"
+                    >
+                      {couponLoading ? "..." : "Apply"}
+                    </button>
+                  </div>
+                )}
+
+                {couponError && (
+                  <p className="mt-1 text-xs text-red-500">{couponError}</p>
+                )}
+              </div>
+
+              {discount > 0 && (
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-slate-600">Coupon Discount</span>
+                  <span className="font-semibold text-green-600">
+                    -₹{formatINR(discount)}
+                  </span>
+                </div>
+              )}
+
+              <div className="flex items-center justify-between border-t border-[#ee027e]/15 pt-3">
+                <span className="font-bold text-slate-900">Total Payable</span>
+                <span className="text-xl font-black text-[#ee027e]">
+                  ₹{formatINR(finalAmount)}
+                </span>
+              </div>
+            </div>
           </div>
 
           {/* =================================================
               CUSTOMER DETAILS
           ================================================= */}
 
-          <div
-            className="
-              mt-5
-              space-y-4
-            "
-          >
+          <div className="mt-5 space-y-4">
             {/* NAME */}
 
             <div>
-              <label
-                className="
-                  mb-1.5
-                  block
-                  text-sm
-                  font-semibold
-                  text-slate-700
-                "
-              >
+              <label className="mb-1.5 block text-sm font-semibold text-slate-700">
                 Your Name
               </label>
 
               <input
                 type="text"
-                 required
+                required
                 value={customer.name}
                 disabled={paymentLoading}
                 onChange={(event) =>
-                  setCustomer(
-                    (previous) => ({
-                      ...previous,
-                      name: event.target.value,
-                    })
-                  )
+                  setCustomer((previous) => ({
+                    ...previous,
+                    name: event.target.value,
+                  }))
                 }
                 placeholder="Enter your name"
-                className="
-                  h-12
-                  w-full
-                  rounded-xl
-                  border
-                  border-slate-300
-                  px-4
-                  text-sm
-                  text-slate-800
-                  outline-none
-                  transition
-                  focus:border-[#ee027e]
-                  focus:ring-2
-                  focus:ring-[#ee027e]/10
-                  disabled:bg-slate-50
-                "
+                className="h-12 w-full rounded-xl border border-slate-300 px-4 text-sm text-slate-800 outline-none transition focus:border-[#ee027e] focus:ring-2 focus:ring-[#ee027e]/10 disabled:bg-slate-50"
               />
             </div>
 
             {/* MOBILE */}
 
             <div>
-              <label
-                className="
-                  mb-1.5
-                  block
-                  text-sm
-                  font-semibold
-                  text-slate-700
-                "
-              >
+              <label className="mb-1.5 block text-sm font-semibold text-slate-700">
                 Mobile Number
               </label>
 
               <input
                 type="tel"
-                 required
+                required
                 inputMode="numeric"
                 maxLength={10}
                 value={customer.mobile}
                 disabled={paymentLoading}
                 onChange={(event) =>
-                  setCustomer(
-                    (previous) => ({
-                      ...previous,
-                      mobile:
-                        event.target.value.replace(
-                          /\D/g,
-                          ""
-                        ),
-                    })
-                  )
+                  setCustomer((previous) => ({
+                    ...previous,
+                    mobile: event.target.value.replace(/\D/g, ""),
+                  }))
                 }
                 placeholder="Enter 10-digit mobile number"
-                className="
-                  h-12
-                  w-full
-                  rounded-xl
-                  border
-                  border-slate-300
-                  px-4
-                  text-sm
-                  text-slate-800
-                  outline-none
-                  transition
-                  focus:border-[#ee027e]
-                  focus:ring-2
-                  focus:ring-[#ee027e]/10
-                  disabled:bg-slate-50
-                "
+                className="h-12 w-full rounded-xl border border-slate-300 px-4 text-sm text-slate-800 outline-none transition focus:border-[#ee027e] focus:ring-2 focus:ring-[#ee027e]/10 disabled:bg-slate-50"
               />
             </div>
 
             {/* ADDRESS */}
 
             <div>
-              <label
-                className="
-                  mb-1.5
-                  block
-                  text-sm
-                  font-semibold
-                  text-slate-700
-                "
-              >
+              <label className="mb-1.5 block text-sm font-semibold text-slate-700">
                 Delivery Address
               </label>
 
               <textarea
                 rows={3}
                 maxLength={500}
-                 required
+                required
                 value={customer.address || ""}
                 disabled={paymentLoading}
                 onChange={(event) =>
-                  setCustomer(
-                    (previous) => ({
-                      ...previous,
-                      address:
-                        event.target.value,
-                    })
-                  )
+                  setCustomer((previous) => ({
+                    ...previous,
+                    address: event.target.value,
+                  }))
                 }
                 placeholder="House no, street, area, city, pincode"
-                className="
-                  w-full
-                  resize-none
-                  rounded-xl
-                  border
-                  border-slate-300
-                  px-4
-                  py-3
-                  text-sm
-                  text-slate-800
-                  outline-none
-                  transition
-                  focus:border-[#ee027e]
-                  focus:ring-2
-                  focus:ring-[#ee027e]/10
-                  disabled:bg-slate-50
-                "
+                className="w-full resize-none rounded-xl border border-slate-300 px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-[#ee027e] focus:ring-2 focus:ring-[#ee027e]/10 disabled:bg-slate-50"
               />
             </div>
           </div>
@@ -634,121 +453,51 @@ const finalAmount = Number((subtotal + deliveryCharge).toFixed(2));
             Kept outside scroll area.
         ================================================= */}
 
-          <form
-  onSubmit={(event) => {
-    event.preventDefault();
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
 
-    if (!cartItems.length) {
-      alert("Your cart is empty.");
-      return;
-    }
+            if (!cartItems.length) {
+              alert("Your cart is empty.");
+              return;
+            }
 
-    if (typeof onPayNow === "function") {
-      onPayNow(event);
-    }
-  }}
-  className="
-    shrink-0
-    border-t
-    border-slate-100
-    bg-white
-    p-4
-    pt-3
-    sm:px-6
-    sm:pb-6
-  "
->
-          <div
-            className="
-              flex
-              w-full
-              gap-2.5
-              sm:gap-3
-            "
-          >
-            {/* =============================================
-                ADD MORE - 35%
-            ============================================= */}
+            if (typeof onPayNow === "function") {
+              /*
+               * Second argument = coupon code.
+               * The server re-validates it and recalculates
+               * the discount, so only the code is sent.
+               */
+              onPayNow(event, appliedCoupon?.code || null);
+            }
+          }}
+          className="shrink-0 border-t border-slate-100 bg-white p-4 pt-3 sm:px-6 sm:pb-6"
+        >
+          <div className="flex w-full gap-2.5 sm:gap-3">
+            {/* ADD MORE - 35% */}
 
             <button
               type="button"
               disabled={paymentLoading || cartItems.length === 0}
               onClick={onAddMore}
-              className="
-                flex
-                h-12
-                w-[35%]
-                shrink-0
-                items-center
-                justify-center
-                gap-1.5
-                rounded-xl
-                border
-                border-[#ee027e]
-                bg-white
-                px-2
-                text-[11px]
-                font-bold
-                text-[#ee027e]
-                transition
-                hover:bg-[#fff0f7]
-                disabled:cursor-not-allowed
-                disabled:opacity-50
-                sm:text-xs
-              "
+              className="flex h-12 w-[35%] shrink-0 items-center justify-center gap-1.5 rounded-xl border border-[#ee027e] bg-white px-2 text-[11px] font-bold text-[#ee027e] transition hover:bg-[#fff0f7] disabled:cursor-not-allowed disabled:opacity-50 sm:text-xs"
             >
-              <ShoppingBag
-                className="
-                  h-4
-                  w-4
-                  shrink-0
-                "
-              />
-
+              <ShoppingBag className="h-4 w-4 shrink-0" />
               Add More
             </button>
 
-            {/* =============================================
-                PAY NOW - REMAINING SPACE ~65%
-            ============================================= */}
+            {/* PAY NOW - REMAINING SPACE */}
 
             <button
               type="submit"
               disabled={paymentLoading || cartItems.length === 0}
-              className="
-                flex
-                h-12
-                min-w-0
-                flex-1
-                items-center
-                justify-center
-                gap-1.5
-                rounded-xl
-                bg-[#ee027e]
-                px-2
-                text-[11px]
-                font-bold
-                text-white
-                shadow-md
-                transition
-                hover:bg-[#c90069]
-                disabled:cursor-not-allowed
-                disabled:opacity-60
-                sm:gap-2
-                sm:text-xs
-              "
+              className="flex h-12 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-xl bg-[#ee027e] px-2 text-[11px] font-bold text-white shadow-md transition hover:bg-[#c90069] disabled:cursor-not-allowed disabled:opacity-60 sm:gap-2 sm:text-xs"
             >
-              <CreditCard
-                className="
-                  h-4
-                  w-4
-                  shrink-0
-                "
-              />
+              <CreditCard className="h-4 w-4 shrink-0" />
 
               {paymentLoading
-  ? "Please wait..."
-  : `Pay Now ₹${formatINR(finalAmount)}`}
+                ? "Please wait..."
+                : `Pay Now ₹${formatINR(finalAmount)}`}
             </button>
           </div>
         </form>
@@ -756,709 +505,3 @@ const finalAmount = Number((subtotal + deliveryCharge).toFixed(2));
     </div>
   );
 }
-
-
-
-
-
-
-
-// import {
-//   CreditCard,
-//   Minus,
-//   Plus,
-//   ShoppingBag,
-//   X,
-// } from "lucide-react";
-
-// const formatINR = (value) =>
-//   Number(value || 0).toLocaleString("en-IN");
-
-// export default function CheckoutModal({
-//   open,
-//   cartItems,
-//   totalAmount,
-//   customer,
-//   setCustomer,
-//   paymentLoading,
-//   onClose,
-//   onAddMore,
-//   onChangeQuantity,
-//   onPayNow,
-// }) {
-//   if (!open) {
-//     return null;
-//   }
-
-//   return (
-//     <div
-//       className="
-//         fixed
-//         inset-0
-//         z-50
-//         flex
-//         items-end
-//         justify-center
-//         bg-black/50
-//         backdrop-blur-[2px]
-//         sm:items-center
-//         sm:p-4
-//       "
-//       onClick={() => {
-//         if (!paymentLoading) {
-//           onClose();
-//         }
-//       }}
-//     >
-//       {/* ===================================================
-//           MODAL
-//       =================================================== */}
-
-//       <div
-//         className="
-//           flex
-//           max-h-[92vh]
-//           w-full
-//           flex-col
-//           rounded-t-[26px]
-//           bg-white
-//           shadow-2xl
-//           sm:max-w-md
-//           sm:rounded-[24px]
-//         "
-//         onClick={(event) =>
-//           event.stopPropagation()
-//         }
-//       >
-//         {/* MOBILE HANDLE */}
-
-//         <div
-//           className="
-//             mx-auto
-//             mt-4
-//             h-1.5
-//             w-11
-//             shrink-0
-//             rounded-full
-//             bg-[#e4d3cc]
-//             sm:hidden
-//           "
-//         />
-
-//         {/* =================================================
-//             CONTENT SCROLL AREA
-//         ================================================= */}
-
-//         <div
-//           className="
-//             min-h-0
-//             flex-1
-//             overflow-y-auto
-//             p-5
-//             pb-3
-//             sm:p-6
-//             sm:pb-3
-//           "
-//         >
-//           {/* HEADER */}
-
-//           <div
-//             className="
-//               flex
-//               items-start
-//               justify-between
-//               gap-4
-//             "
-//           >
-//             <div>
-//               <p
-//                 className="
-//                   text-[10px]
-//                   font-bold
-//                   uppercase
-//                   tracking-[0.2em]
-//                   text-[#ee027e]
-//                 "
-//               >
-//                 Checkout
-//               </p>
-
-//               <h2
-//                 className="
-//                   mt-1
-//                   text-xl
-//                   font-black
-//                   text-slate-900
-//                   sm:text-2xl
-//                 "
-//               >
-//                 Complete Your Order
-//               </h2>
-//             </div>
-
-//             <button
-//               type="button"
-//               disabled={paymentLoading}
-//               onClick={onClose}
-//               className="
-//                 flex
-//                 h-9
-//                 w-9
-//                 shrink-0
-//                 items-center
-//                 justify-center
-//                 rounded-full
-//                 bg-[#ee027e]/10
-//                 text-[#ee027e]
-//                 transition
-//                 hover:bg-[#ee027e]/15
-//                 disabled:opacity-50
-//               "
-//               aria-label="Close checkout"
-//             >
-//               <X size={18} />
-//             </button>
-//           </div>
-
-//           {/* =================================================
-//               ORDER SUMMARY
-//           ================================================= */}
-
-//           <div
-//             className="
-//               mt-5
-//               rounded-2xl
-//               border
-//               border-[#ee027e]/10
-//               bg-[#fff8f8]
-//               p-4
-//             "
-//           >
-//             <div
-//               className="
-//                 mb-3
-//                 flex
-//                 items-center
-//                 justify-between
-//                 gap-3
-//               "
-//             >
-//               <p
-//                 className="
-//                   text-sm
-//                   font-bold
-//                   text-slate-900
-//                 "
-//               >
-//                 Order Summary
-//               </p>
-
-//               <span
-//                 className="
-//                   rounded-full
-//                   bg-white
-//                   px-2.5
-//                   py-1
-//                   text-[10px]
-//                   font-bold
-//                   text-[#ee027e]
-//                 "
-//               >
-//                 {cartItems.length}{" "}
-//                 {cartItems.length === 1
-//                   ? "Product"
-//                   : "Products"}
-//               </span>
-//             </div>
-
-//             {/* ===============================================
-//                 PRODUCTS SCROLL HERE
-
-//                 More products can be added without making
-//                 the complete checkout popup excessively tall.
-//             =============================================== */}
-
-//             <div
-//               className="
-//                 max-h-[210px]
-//                 space-y-3
-//                 overflow-y-auto
-//                 overscroll-contain
-//                 pr-1
-//                 sm:max-h-[240px]
-//               "
-//             >
-//               {cartItems.map((item) => (
-//                 <div
-//                   key={item.variantId}
-//                   className="
-//                     flex
-//                     items-center
-//                     gap-3
-//                     rounded-xl
-//                     bg-white/60
-//                     p-2
-//                   "
-//                 >
-//                   {/* IMAGE */}
-
-//                   <div
-//                     className="
-//                       h-14
-//                       w-11
-//                       shrink-0
-//                       overflow-hidden
-//                       rounded-lg
-//                       bg-[#f6efef]
-//                     "
-//                   >
-//                     {item.image_url ? (
-//                       <img
-//                         src={item.image_url}
-//                         alt={item.name}
-//                         className="
-//                           h-full
-//                           w-full
-//                           object-cover
-//                         "
-//                       />
-//                     ) : null}
-//                   </div>
-
-//                   {/* DETAILS */}
-
-//                   <div
-//                     className="
-//                       min-w-0
-//                       flex-1
-//                     "
-//                   >
-//                     <p
-//                       className="
-//                         truncate
-//                         text-sm
-//                         font-semibold
-//                         text-slate-800
-//                       "
-//                     >
-//                       {item.name}
-//                     </p>
-
-//                     <p
-//                       className="
-//                         mt-0.5
-//                         text-xs
-//                         text-slate-500
-//                       "
-//                     >
-//                       Size {item.size} · ₹
-//                       {formatINR(item.price)}
-//                     </p>
-
-//                     {/* QUANTITY */}
-
-//                     <div
-//                       className="
-//                         mt-1.5
-//                         flex
-//                         items-center
-//                         gap-2
-//                       "
-//                     >
-//                       <button
-//                         type="button"
-//                         disabled={paymentLoading}
-//                         onClick={() =>
-//                           onChangeQuantity(
-//                             item.variantId,
-//                             -1
-//                           )
-//                         }
-//                         className="
-//                           flex
-//                           h-6
-//                           w-6
-//                           items-center
-//                           justify-center
-//                           rounded-md
-//                           border
-//                           border-[#ee027e]/20
-//                           text-[#ee027e]
-//                           disabled:opacity-40
-//                         "
-//                       >
-//                         <Minus size={12} />
-//                       </button>
-
-//                       <span
-//                         className="
-//                           w-5
-//                           text-center
-//                           text-xs
-//                           font-bold
-//                           text-slate-900
-//                         "
-//                       >
-//                         {item.quantity}
-//                       </span>
-
-//                       <button
-//                         type="button"
-//                         disabled={paymentLoading}
-//                         onClick={() =>
-//                           onChangeQuantity(
-//                             item.variantId,
-//                             1
-//                           )
-//                         }
-//                         className="
-//                           flex
-//                           h-6
-//                           w-6
-//                           items-center
-//                           justify-center
-//                           rounded-md
-//                           bg-[#ee027e]
-//                           text-white
-//                           disabled:opacity-40
-//                         "
-//                       >
-//                         <Plus size={12} />
-//                       </button>
-//                     </div>
-//                   </div>
-
-//                   {/* ITEM TOTAL */}
-
-//                   <p
-//                     className="
-//                       shrink-0
-//                       text-sm
-//                       font-bold
-//                       text-slate-900
-//                     "
-//                   >
-//                     ₹{formatINR(item.total)}
-//                   </p>
-//                 </div>
-//               ))}
-//             </div>
-
-//             {/* TOTAL */}
-
-//             <div
-//               className="
-//                 mt-4
-//                 flex
-//                 items-center
-//                 justify-between
-//                 border-t
-//                 border-[#ee027e]/15
-//                 pt-3
-//               "
-//             >
-//               <span
-//                 className="
-//                   font-bold
-//                   text-slate-900
-//                 "
-//               >
-//                 Total
-//               </span>
-
-//               <span
-//                 className="
-//                   text-xl
-//                   font-black
-//                   text-[#ee027e]
-//                 "
-//               >
-//                 ₹{formatINR(totalAmount)}
-//               </span>
-//             </div>
-//           </div>
-
-//           {/* =================================================
-//               CUSTOMER DETAILS
-//           ================================================= */}
-
-//           <div
-//             className="
-//               mt-5
-//               space-y-4
-//             "
-//           >
-//             {/* NAME */}
-
-//             <div>
-//               <label
-//                 className="
-//                   mb-1.5
-//                   block
-//                   text-sm
-//                   font-semibold
-//                   text-slate-700
-//                 "
-//               >
-//                 Your Name
-//               </label>
-
-//               <input
-//                 type="text"
-//                 value={customer.name}
-//                 disabled={paymentLoading}
-//                 onChange={(event) =>
-//                   setCustomer(
-//                     (previous) => ({
-//                       ...previous,
-//                       name: event.target.value,
-//                     })
-//                   )
-//                 }
-//                 placeholder="Enter your name"
-//                 className="
-//                   h-12
-//                   w-full
-//                   rounded-xl
-//                   border
-//                   border-slate-300
-//                   px-4
-//                   text-sm
-//                   text-slate-800
-//                   outline-none
-//                   transition
-//                   focus:border-[#ee027e]
-//                   focus:ring-2
-//                   focus:ring-[#ee027e]/10
-//                   disabled:bg-slate-50
-//                 "
-//               />
-//             </div>
-
-//             {/* MOBILE */}
-
-//             <div>
-//               <label
-//                 className="
-//                   mb-1.5
-//                   block
-//                   text-sm
-//                   font-semibold
-//                   text-slate-700
-//                 "
-//               >
-//                 Mobile Number
-//               </label>
-
-//               <input
-//                 type="tel"
-//                 inputMode="numeric"
-//                 maxLength={10}
-//                 value={customer.mobile}
-//                 disabled={paymentLoading}
-//                 onChange={(event) =>
-//                   setCustomer(
-//                     (previous) => ({
-//                       ...previous,
-//                       mobile:
-//                         event.target.value.replace(
-//                           /\D/g,
-//                           ""
-//                         ),
-//                     })
-//                   )
-//                 }
-//                 placeholder="Enter 10-digit mobile number"
-//                 className="
-//                   h-12
-//                   w-full
-//                   rounded-xl
-//                   border
-//                   border-slate-300
-//                   px-4
-//                   text-sm
-//                   text-slate-800
-//                   outline-none
-//                   transition
-//                   focus:border-[#ee027e]
-//                   focus:ring-2
-//                   focus:ring-[#ee027e]/10
-//                   disabled:bg-slate-50
-//                 "
-//               />
-//             </div>
-
-//             {/* ADDRESS */}
-
-//             <div>
-//               <label
-//                 className="
-//                   mb-1.5
-//                   block
-//                   text-sm
-//                   font-semibold
-//                   text-slate-700
-//                 "
-//               >
-//                 Delivery Address
-//               </label>
-
-//               <textarea
-//                 rows={3}
-//                 maxLength={500}
-//                 value={customer.address}
-//                 disabled={paymentLoading}
-//                 onChange={(event) =>
-//                   setCustomer(
-//                     (previous) => ({
-//                       ...previous,
-//                       address:
-//                         event.target.value,
-//                     })
-//                   )
-//                 }
-//                 placeholder="House no, street, area, city, pincode"
-//                 className="
-//                   w-full
-//                   resize-none
-//                   rounded-xl
-//                   border
-//                   border-slate-300
-//                   px-4
-//                   py-3
-//                   text-sm
-//                   text-slate-800
-//                   outline-none
-//                   transition
-//                   focus:border-[#ee027e]
-//                   focus:ring-2
-//                   focus:ring-[#ee027e]/10
-//                   disabled:bg-slate-50
-//                 "
-//               />
-//             </div>
-//           </div>
-//         </div>
-
-//         {/* =================================================
-//             BOTTOM ACTIONS
-
-//             35% Add More
-//             65% Pay Now
-
-//             Kept outside scroll area.
-//         ================================================= */}
-
-//         <form
-//           onSubmit={onPayNow}
-//           className="
-//             shrink-0
-//             border-t
-//             border-slate-100
-//             bg-white
-//             p-4
-//             pt-3
-//             sm:px-6
-//             sm:pb-6
-//           "
-//         >
-//           <div
-//             className="
-//               flex
-//               w-full
-//               gap-2.5
-//               sm:gap-3
-//             "
-//           >
-//             {/* =============================================
-//                 ADD MORE - 35%
-//             ============================================= */}
-
-//             <button
-//               type="button"
-//               disabled={paymentLoading}
-//               onClick={onAddMore}
-//               className="
-//                 flex
-//                 h-12
-//                 w-[35%]
-//                 shrink-0
-//                 items-center
-//                 justify-center
-//                 gap-1.5
-//                 rounded-xl
-//                 border
-//                 border-[#ee027e]
-//                 bg-white
-//                 px-2
-//                 text-[11px]
-//                 font-bold
-//                 text-[#ee027e]
-//                 transition
-//                 hover:bg-[#fff0f7]
-//                 disabled:cursor-not-allowed
-//                 disabled:opacity-50
-//                 sm:text-xs
-//               "
-//             >
-//               <ShoppingBag
-//                 className="
-//                   h-4
-//                   w-4
-//                   shrink-0
-//                 "
-//               />
-
-//               Add More
-//             </button>
-
-//             {/* =============================================
-//                 PAY NOW - REMAINING SPACE ~65%
-//             ============================================= */}
-
-//             <button
-//               type="submit"
-//               disabled={paymentLoading}
-//               className="
-//                 flex
-//                 h-12
-//                 min-w-0
-//                 flex-1
-//                 items-center
-//                 justify-center
-//                 gap-1.5
-//                 rounded-xl
-//                 bg-[#ee027e]
-//                 px-2
-//                 text-[11px]
-//                 font-bold
-//                 text-white
-//                 shadow-md
-//                 transition
-//                 hover:bg-[#c90069]
-//                 disabled:cursor-not-allowed
-//                 disabled:opacity-60
-//                 sm:gap-2
-//                 sm:text-xs
-//               "
-//             >
-//               <CreditCard
-//                 className="
-//                   h-4
-//                   w-4
-//                   shrink-0
-//                 "
-//               />
-
-//               {paymentLoading
-//                 ? "Please wait..."
-//                 : `Pay Now ₹${formatINR(
-//                     totalAmount
-//                   )}`}
-//             </button>
-//           </div>
-//         </form>
-//       </div>
-//     </div>
-//   );
-// }

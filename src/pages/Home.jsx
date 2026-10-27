@@ -820,8 +820,8 @@ const grandTotal =
      PAY NOW
   ======================================================= */
 
-  const handlePayNow =
-    async (event) => {
+ const handlePayNow =
+  async (event, couponCode = null) => {
       event.preventDefault();
 
       if (paymentLoading) {
@@ -934,6 +934,8 @@ const grandTotal =
 
               cart_id:
                 cartId,
+                coupon_code:
+        couponCode,
             }
           );
 
